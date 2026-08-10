@@ -1102,6 +1102,7 @@ func (o *ScaleUpOrchestrator) prepareScaleUp(ctx context.Context, args scaleUpCt
 
 	if len(options) == 0 {
 		logger.V(1).Info("No expansion options")
+		args.podEquivalenceGroups = markAllGroupsAsUnschedulable(args.podEquivalenceGroups, NoScaleUpOptionsAvailableReason)
 		return scaleUpPlan{}, o.noOptionsAvailableStatus(ctx, args), nil
 	}
 
