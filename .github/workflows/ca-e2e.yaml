@@ -5,11 +5,13 @@ on:
       - '**/*.go'
       - 'go.mod'
       - 'go.sum'
+      - 'kind-config.yaml'
   pull_request:
     paths:
       - '**/*.go'
       - 'go.mod'
       - 'go.sum'
+      - 'kind-config.yaml'
 
 permissions:
   contents: read

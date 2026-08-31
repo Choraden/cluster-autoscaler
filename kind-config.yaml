@@ -8,5 +8,5 @@ runtimeConfig:
   "resource.k8s.io/v1": true
 nodes:
   - role: control-plane
-    image: kindest/node:v1.36.1
+    image: kindest/node:v1.37.0
 
