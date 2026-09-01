@@ -37,7 +37,7 @@ func TestClusterAutoscaling(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "fake-pod",
-			Namespace: "default",
+			Namespace: testEnv.EnvConf().Namespace(),
 			Labels: map[string]string{
 				"app": "fake-pod",
 			},
