@@ -69,6 +69,7 @@ updates:
     - dependency-name: "k8s.io/sample-cli-plugin"
     - dependency-name: "k8s.io/sample-controller"
   labels:
-    - "ok-to-test"
     - "area/cluster-autoscaler"
     - "area/dependency"
+    - "ok-to-test"
+    - "release-note-none"
