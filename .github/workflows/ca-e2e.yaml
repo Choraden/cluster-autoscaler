@@ -32,8 +32,5 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Install Dependencies
-        run: make install-dependencies
-
       - name: Test
         run: make run-e2e
