@@ -49,6 +49,9 @@ import (
 type BufferController interface {
 	// Start starts the controller, blocks until context is done.
 	Start(ctx context.Context) error
+	// SetupWithManager registers the controller, and the controllers it owns, with the
+	// passed manager. The context bounds the lifetime of the registered controllers.
+	SetupWithManager(ctx context.Context, mgr ctrl.Manager) error
 }
 
 type bufferController struct {
@@ -100,7 +103,7 @@ func InitializeAndRunDefaultBufferController(
 	// Accepting empty string as it represents nil value for ProvisioningStrategy
 	defaultStrategies := []string{capacitybuffer.ActiveProvisioningStrategy, ""}
 	controller := NewDefaultBufferController(client, resolver, defaultStrategies, reconciledBuffersCache, realClock)
-	if err := mgr.Add(controller); err != nil {
+	if err := controller.SetupWithManager(ctx, mgr); err != nil {
 		return err
 	}
 
@@ -328,6 +331,27 @@ func (c *bufferController) enqueueBuffersReferencingScalableObject(obj interface
 			return // we reconcile the whole namespace, so finding one buffer is enough to trigger it.
 		}
 	}
+}
+
+// SetupWithManager registers the controller and its dynamic watch controller with the
+// passed manager.
+func (c *bufferController) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
+	if err := mgr.Add(c); err != nil {
+		return fmt.Errorf("failed to add capacity buffer controller to manager: %w", err)
+	}
+
+	watcher := newDynamicWatcher(dynamicWatcherOptions{
+		BaseContext: ctx,
+		Cache:       mgr.GetCache(),
+		Client:      mgr.GetClient(),
+		Mapper:      mgr.GetRESTMapper(),
+		// Events on a watched object are turned into a reconciliation of the namespace
+		// that object's buffers live in.
+		EnqueueNamespace: func(namespace string) {
+			c.queue.Add(namespace)
+		},
+	})
+	return watcher.SetupWithManager(mgr)
 }
 
 // Start starts the controller, blocking until context is done.
