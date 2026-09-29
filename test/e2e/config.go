@@ -46,6 +46,10 @@ type TestConfig struct {
 	ScaleDownTimeout     time.Duration
 	PodSchedulingTimeout time.Duration
 	PodDeletionTimeout   time.Duration
+	// NoScaleDownWindow is how long tests assert that the node count stays unchanged when
+	// scale-down is expected to be blocked. It must be longer than the time CA needs to
+	// remove an unneeded node in this environment.
+	NoScaleDownWindow time.Duration
 }
 
 // KwokTestConfig returns the TestConfig for running E2E tests against the local Kind + KWOK cluster.
@@ -67,6 +71,9 @@ func KwokTestConfig() *TestConfig {
 		ScaleDownTimeout:     1 * time.Minute,
 		PodSchedulingTimeout: 1 * time.Minute,
 		PodDeletionTimeout:   1 * time.Minute,
+		// CA runs with --scale-down-unneeded-time=10s and the default 10s --scan-interval,
+		// so an unneeded node is removed within ~30s. 45s leaves margin on top of that.
+		NoScaleDownWindow: 45 * time.Second,
 	}
 }
 
