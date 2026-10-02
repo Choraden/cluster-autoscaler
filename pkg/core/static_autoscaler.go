@@ -506,10 +506,12 @@ func (a *StaticAutoscaler) RunOnce(ctx context.Context, currentTime time.Time) c
 	// The fake nodes are intentionally not added to the all nodes list, so that they are not considered as candidates for scale-down (which
 	// doesn't make sense as they're not real).
 	templateNodeInfos := a.AutoscalingContext.TemplateNodeInfoRegistry.GetNodeInfos()
-	if _, err := a.addUpcomingNodesToClusterSnapshot(ctx, upcomingCounts, templateNodeInfos, "upcoming-%d"); err != nil {
+	upcomingNodes, err := a.addUpcomingNodesToClusterSnapshot(ctx, upcomingCounts, templateNodeInfos, "upcoming-%d")
+	if err != nil {
 		logger.Error(err, "Failed adding upcoming nodes to cluster snapshot")
 		return caerrors.ToAutoscalerError(caerrors.InternalError, err)
 	}
+	logger.V(4).Info("Upcoming nodes", "nodesCount", len(upcomingNodes))
 	// Some upcoming nodes can already be registered in the cluster, but not yet ready - we still inject replacements for them above. The actual registered nodes
 	// have to be filtered out of the all nodes list so that scale-down can't consider them as candidates. Otherwise, with aggressive scale-down settings, we
 	// could be removing the nodes before they have a chance to first become ready (the duration of which should be unrelated to the scale-down settings).
