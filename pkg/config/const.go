@@ -54,4 +54,13 @@ const (
 	DefaultScaleDownDelayAfterFailure = 3 * time.Minute
 	// DefaultScanInterval is the default scan interval for CA
 	DefaultScanInterval = 10 * time.Second
+	// DefaultMaxGracefulTerminationSec is the default maximum number of seconds CA waits for pod termination
+	// when trying to scale down a node.
+	DefaultMaxGracefulTerminationSec = 600
+	// DefaultEstimatorName is the default estimator used in scale up.
+	// It must be kept in sync with estimator.BinpackingEstimatorName.
+	DefaultEstimatorName = "binpacking"
+	// DefaultExpanderName is the default node group expander used in scale up.
+	// It must be kept in sync with expander.LeastWasteExpanderName.
+	DefaultExpanderName = "least-waste"
 )

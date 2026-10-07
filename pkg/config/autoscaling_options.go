@@ -19,9 +19,11 @@ package config
 import (
 	"time"
 
+	kube_rest "k8s.io/client-go/rest"
 	kubelet_config "k8s.io/kubernetes/pkg/kubelet/apis/config"
 	scheduler_config "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	gce_localssdsize "sigs.k8s.io/cluster-autoscaler/pkg/cloudprovider/gce/localssdsize"
+	"sigs.k8s.io/cluster-autoscaler/pkg/utils/units"
 )
 
 // GpuLimits define lower and upper bound on GPU instances of given type in cluster
@@ -58,6 +60,21 @@ type NodeGroupAutoscalingOptions struct {
 	AllowNonAtomicScaleUpToMax bool
 	// IgnoreDaemonSetsUtilization sets if daemonsets utilization should be considered during node scale-down
 	IgnoreDaemonSetsUtilization bool
+}
+
+// DefaultNodeGroupAutoscalingOptions returns the default options for a NodeGroup.
+func DefaultNodeGroupAutoscalingOptions() NodeGroupAutoscalingOptions {
+	return NodeGroupAutoscalingOptions{
+		ScaleDownUtilizationThreshold:    DefaultScaleDownUtilizationThreshold,
+		ScaleDownGpuUtilizationThreshold: DefaultScaleDownGpuUtilizationThreshold,
+		ScaleDownUnneededTime:            DefaultScaleDownUnneededTime,
+		ScaleDownUnreadyTime:             DefaultScaleDownUnreadyTime,
+		MaxNodeProvisionTime:             15 * time.Minute,
+		MaxNodeStartupTime:               15 * time.Minute,
+		ZeroOrMaxNodeScaling:             false,
+		AllowNonAtomicScaleUpToMax:       false,
+		IgnoreDaemonSetsUtilization:      false,
+	}
 }
 
 // GCEOptions contain autoscaling options specific to GCE cloud provider.
@@ -390,6 +407,98 @@ type AutoscalingOptions struct {
 	PendingPodsBatchingTimeout time.Duration
 	// GracefulDegradationEnabled tells if graceful degradation for unschedulable pods is enabled.
 	GracefulDegradationEnabled bool
+}
+
+// AutoscalingOptionModifier is a function that can mutate an AutoscalingOptions struct.
+type AutoscalingOptionModifier func(*AutoscalingOptions)
+
+// DefaultAutoscalingOptions returns AutoscalingOptions populated with the default values
+// (the same values that are used as CLI flag defaults), with the given modifiers applied in order.
+// CloudProviderName is intentionally left empty to avoid an import cycle with the cloud provider builder.
+func DefaultAutoscalingOptions(modifiers ...AutoscalingOptionModifier) AutoscalingOptions {
+	opts := AutoscalingOptions{
+		NodeGroupDefaults:                            DefaultNodeGroupAutoscalingOptions(),
+		NodeGroupSetRatios:                           NewDefaultNodeGroupDifferenceRatios(),
+		EstimatorName:                                DefaultEstimatorName,
+		ExpanderNames:                                DefaultExpanderName,
+		MaxNodesTotal:                                0,
+		MinCoresTotal:                                0,
+		MaxCoresTotal:                                DefaultMaxClusterCores,
+		MinMemoryTotal:                               0,
+		MaxMemoryTotal:                               DefaultMaxClusterMemory * units.GiB,
+		MaxGracefulTerminationSec:                    DefaultMaxGracefulTerminationSec,
+		MaxTotalUnreadyPercentage:                    45.0,
+		OkTotalUnreadyCount:                          3,
+		ScaleUpFromZero:                              true,
+		SalvoScaleUpBudget:                           time.Minute,
+		ScaleDownEnabled:                             true,
+		ScaleDownUnreadyEnabled:                      true,
+		ScaleDownDelayAfterAdd:                       10 * time.Minute,
+		ScaleDownDelayAfterDelete:                    0,
+		ScaleDownDelayAfterFailure:                   DefaultScaleDownDelayAfterFailure,
+		ScaleDownNonEmptyCandidatesCount:             30,
+		ScaleDownCandidatesPoolRatio:                 0.1,
+		ScaleDownCandidatesPoolMinCount:              50,
+		ScaleDownSimulationTimeout:                   30 * time.Second,
+		NodeDeletionDelayTimeout:                     2 * time.Minute,
+		WriteStatusConfigMap:                         true,
+		StatusConfigMapName:                          "cluster-autoscaler-status",
+		ConfigNamespace:                              "kube-system",
+		UnremovableNodeRecheckTimeout:                5 * time.Minute,
+		ExpendablePodsPriorityCutoff:                 -10,
+		MaxBulkSoftTaintCount:                        10,
+		MaxBulkSoftTaintTime:                         3 * time.Second,
+		MaxPodEvictionTime:                           2 * time.Minute,
+		CordonNodeBeforeTerminate:                    true,
+		DaemonSetEvictionForOccupiedNodes:            true,
+		UserAgent:                                    "cluster-autoscaler",
+		InitialNodeGroupBackoffDuration:              5 * time.Minute,
+		MaxNodeGroupBackoffDuration:                  30 * time.Minute,
+		NodeGroupBackoffResetTimeout:                 3 * time.Hour,
+		MaxScaleDownParallelism:                      10,
+		MaxDrainParallelism:                          1,
+		MaxNodesPerScaleUp:                           1000,
+		MaxNodeGroupBinpackingDuration:               10 * time.Second,
+		MaxBinpackingTime:                            5 * time.Minute,
+		SkipNodesWithSystemPods:                      true,
+		SkipNodesWithLocalStorage:                    true,
+		SkipNodesWithCustomControllerPods:            true,
+		BspDisruptionTimeout:                         time.Hour,
+		NodeDeleteDelayAfterTaint:                    5 * time.Second,
+		DynamicResourceAllocationEnabled:             true,
+		CSINodeAwareSchedulingEnabled:                true,
+		PredicateParallelism:                         4,
+		MaxInactivityTime:                            10 * time.Minute,
+		MaxFailingTime:                               15 * time.Minute,
+		MaxStartupTime:                               20 * time.Minute,
+		Address:                                      ":8085",
+		FrequentLoopsEnabled:                         true,
+		ScanInterval:                                 DefaultScanInterval,
+		NodeInfoCacheExpireTime:                      87600 * time.Hour,
+		PodInjectionLimit:                            5000,
+		CapacityBufferPodDryRunEnabled:               true,
+		CapacityBufferReadyReplicasEnabled:           true,
+		PendingPodsBatchingTimeout:                   4 * time.Minute,
+		ProvisioningRequestInitialBackoffTime:        time.Minute,
+		ProvisioningRequestMaxBackoffTime:            10 * time.Minute,
+		ProvisioningRequestMaxBackoffCacheSize:       1000,
+		CheckCapacityProvisioningRequestMaxBatchSize: 10,
+		CheckCapacityProvisioningRequestBatchTimebox: 10 * time.Second,
+		GCEOptions: GCEOptions{
+			ConcurrentRefreshes:            1,
+			MigInstancesMinRefreshWaitTime: 5 * time.Second,
+			LocalSSDDiskSizeProvider:       gce_localssdsize.NewSimpleLocalSSDProvider(),
+		},
+		KubeClientOpts: KubeClientOptions{
+			APIContentType:  "application/vnd.kubernetes.protobuf",
+			KubeClientBurst: kube_rest.DefaultBurst,
+			KubeClientQPS:   kube_rest.DefaultQPS,
+		},
+	}
+	for _, mod := range modifiers {
+		mod(&opts)
+	}
+	return opts
 }
 
 // KubeClientOptions specify options for kube client

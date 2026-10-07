@@ -23,6 +23,8 @@ import (
 
 	"k8s.io/klog/v2"
 	kubelet_config "k8s.io/kubernetes/pkg/kubelet/apis/config"
+	cloudBuilder "sigs.k8s.io/cluster-autoscaler/pkg/cloudprovider/builder"
+	"sigs.k8s.io/cluster-autoscaler/pkg/cloudprovider/gce/localssdsize"
 	"sigs.k8s.io/cluster-autoscaler/pkg/config"
 
 	"github.com/google/go-cmp/cmp"
@@ -666,6 +668,45 @@ func TestAutoscalingFlagsValidationEdgeCases(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDefaultFlagsMatchDefaultAutoscalingOptions(t *testing.T) {
+	want := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.CloudProviderName = cloudBuilder.DefaultCloudProvider()
+	})
+	cmpOpts := []cmp.Option{
+		cmpopts.EquateEmpty(),
+		cmp.AllowUnexported(localssdsize.SimpleLocalSSDProvider{}),
+	}
+
+	for _, tc := range []struct {
+		name     string
+		newFlags func() *AutoscalingFlags
+		addFlags bool
+	}{
+		{name: "NewAutoscalingFlags with AddFlags", newFlags: NewAutoscalingFlags, addFlags: true},
+		{name: "zero-value AutoscalingFlags with AddFlags", newFlags: func() *AutoscalingFlags { return &AutoscalingFlags{} }, addFlags: true},
+		{name: "NewAutoscalingFlags without AddFlags", newFlags: NewAutoscalingFlags, addFlags: false},
+		{name: "zero-value AutoscalingFlags without AddFlags", newFlags: func() *AutoscalingFlags { return &AutoscalingFlags{} }, addFlags: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := tc.newFlags()
+			if tc.addFlags {
+				fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+				f.AddFlags(fs)
+				if err := fs.Parse([]string{}); err != nil {
+					t.Fatalf("Parse() got unexpected error: %v", err)
+				}
+			}
+			got, err := f.Options()
+			if err != nil {
+				t.Fatalf("Options() got unexpected error: %v", err)
+			}
+			if diff := cmp.Diff(want, got, cmpOpts...); diff != "" {
+				t.Errorf("Options() differs from config.DefaultAutoscalingOptions() (-want +got):\n%s", diff)
 			}
 		})
 	}

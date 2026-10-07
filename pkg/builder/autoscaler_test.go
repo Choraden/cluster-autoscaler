@@ -25,8 +25,6 @@ import (
 	"sigs.k8s.io/cluster-autoscaler/pkg/cloudprovider/test"
 	"sigs.k8s.io/cluster-autoscaler/pkg/config"
 	"sigs.k8s.io/cluster-autoscaler/pkg/debuggingsnapshot"
-	"sigs.k8s.io/cluster-autoscaler/pkg/estimator"
-	"sigs.k8s.io/cluster-autoscaler/pkg/expander"
 	"sigs.k8s.io/cluster-autoscaler/pkg/loop"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -39,11 +37,9 @@ func TestAutoscalerBuilderNoError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		options := config.AutoscalingOptions{
-			CloudProviderName: "gce",
-			EstimatorName:     estimator.BinpackingEstimatorName,
-			ExpanderNames:     expander.LeastWasteExpanderName,
-		}
+		options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+			o.CloudProviderName = "gce"
+		})
 
 		debuggingSnapshotter := debuggingsnapshot.NewDebuggingSnapshotter(false)
 		kubeClient := fake.NewClientset()

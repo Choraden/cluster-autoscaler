@@ -25,35 +25,39 @@ import (
 )
 
 // DefaultAutoscalingOptions provides the baseline configuration for all tests.
-var DefaultAutoscalingOptions = config.AutoscalingOptions{
-	NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-		ScaleDownUnneededTime:         time.Second,
-		ScaleDownUnreadyTime:          time.Minute,
-		ScaleDownUtilizationThreshold: 0.5,
-		MaxNodeProvisionTime:          10 * time.Second,
-	},
-	MaxTotalUnreadyPercentage:  1,
-	OkTotalUnreadyCount:        100000,
-	EstimatorName:              estimator.BinpackingEstimatorName,
-	EnforceNodeGroupMinSize:    true,
-	ScaleDownSimulationTimeout: 24 * time.Hour,
-	ScaleDownDelayAfterAdd:     0,
-	ScaleDownDelayAfterDelete:  0,
-	ScaleDownDelayAfterFailure: 0,
-	MaxScaleDownParallelism:    10,
-	MaxDrainParallelism:        1,
-	ScaleDownDelayTypeLocal:    true,
-	ScaleDownEnabled:           true,
-	MaxNodesTotal:              10000,
-	MaxCoresTotal:              100000,             // WARN: This setting isn't actually used by the fake CloudProvider.GetResourceLimiter(), there's a separate config there.
-	MaxMemoryTotal:             100000 * units.GiB, // WARN: This setting isn't actually used by the fake CloudProvider.GetResourceLimiter(), there's a separate config there.
-	ExpanderNames:              "least-waste",
-	ScaleUpFromZero:            true,
-	FrequentLoopsEnabled:       true,
-	ClusterName:                "cluster-test",
-	MaxBinpackingTime:          10 * time.Second,
-	PredicateParallelism:       1,
-}
+// It starts from the canonical production defaults and applies test-accelerated overrides.
+var DefaultAutoscalingOptions = config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+	o.NodeGroupDefaults.ScaleDownUnneededTime = time.Second
+	o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+	o.NodeGroupDefaults.ScaleDownUtilizationThreshold = 0.5
+	o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+	o.MaxTotalUnreadyPercentage = 1
+	o.OkTotalUnreadyCount = 100000
+	o.EstimatorName = estimator.BinpackingEstimatorName
+	o.EnforceNodeGroupMinSize = true
+	o.ScaleDownSimulationTimeout = 24 * time.Hour
+	o.ScaleDownDelayAfterAdd = 0
+	o.ScaleDownDelayAfterDelete = 0
+	o.ScaleDownDelayAfterFailure = 0
+	o.MaxScaleDownParallelism = 10
+	o.MaxDrainParallelism = 1
+	o.ScaleDownDelayTypeLocal = true
+	o.ScaleDownEnabled = true
+	o.MaxNodesTotal = 10000
+	o.MaxCoresTotal = 100000              // WARN: This setting isn't actually used by the fake CloudProvider.GetResourceLimiter(), there's a separate config there.
+	o.MaxMemoryTotal = 100000 * units.GiB // WARN: This setting isn't actually used by the fake CloudProvider.GetResourceLimiter(), there's a separate config there.
+	o.ExpanderNames = "least-waste"
+	o.ScaleUpFromZero = true
+	o.FrequentLoopsEnabled = true
+	o.ClusterName = "cluster-test"
+	o.MaxBinpackingTime = 10 * time.Second
+	o.PredicateParallelism = 1
+	// Keep synctest virtual-clock behavior unaffected: no sleep between tainting and deleting a node.
+	o.NodeDeleteDelayAfterTaint = 0
+	o.WriteStatusConfigMap = false
+	// The in-memory test environment does not provide CSINode objects for all nodes.
+	o.CSINodeAwareSchedulingEnabled = false
+})
 
 // TestConfig is the "blueprint" for a test. It defines the entire
 // initial state of the world before the test runs.
@@ -73,7 +77,7 @@ func NewTestConfig() *TestConfig {
 }
 
 // AutoscalingOptionOverride is a function that modifies an AutoscalingOptions object.
-type AutoscalingOptionOverride func(*config.AutoscalingOptions)
+type AutoscalingOptionOverride = config.AutoscalingOptionModifier
 
 // WithOverrides allows adding options overrides to the config.
 func (c *TestConfig) WithOverrides(overrides ...AutoscalingOptionOverride) *TestConfig {
