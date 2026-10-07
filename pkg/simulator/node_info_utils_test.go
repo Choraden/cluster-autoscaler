@@ -442,7 +442,9 @@ func TestCreateSanitizedNodeInfo(t *testing.T) {
 		{Key: taints.ToBeDeletedTaint, Value: "2312532423", Effect: apiv1.TaintEffectNoSchedule},
 		{Key: "a", Value: "b", Effect: apiv1.TaintEffectNoSchedule},
 	}
-	taintConfig := taints.NewTaintConfig(config.AutoscalingOptions{StartupTaints: []string{"startup-taint"}})
+	taintConfig := taints.NewTaintConfig(config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.StartupTaints = []string{"startup-taint"}
+	}))
 
 	taintsLabelsNode := labelsNode.DeepCopy()
 	taintsLabelsNode.Spec.Taints = taintsNode.Spec.Taints

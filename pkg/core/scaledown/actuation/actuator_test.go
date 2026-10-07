@@ -1208,12 +1208,13 @@ func runStartDeletionTest(t *testing.T, tc startDeletionTestCase, force bool) {
 	}
 
 	// Set up other needed structures and options.
-	opts := config.AutoscalingOptions{
-		MaxScaleDownParallelism:        10,
-		MaxDrainParallelism:            5,
-		MaxPodEvictionTime:             0,
-		DaemonSetEvictionForEmptyNodes: true,
-	}
+	opts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxDrainParallelism = 5
+		o.MaxPodEvictionTime = 0
+		o.DaemonSetEvictionForEmptyNodes = true
+		// NewScaleTestAutoscalingContext does not set up a CSI provider.
+		o.CSINodeAwareSchedulingEnabled = false
+	})
 
 	allPods := []*apiv1.Pod{}
 
@@ -1234,7 +1235,7 @@ func runStartDeletionTest(t *testing.T, tc startDeletionTestCase, force bool) {
 		t.Fatalf("Couldn't set up autoscaling context: %v", err)
 	}
 	scaleStateNotifier := nodegroupchange.NewNodeGroupChangeObserversList()
-	_ = clusterstate.NewClusterStateRegistry(provider, autoscalingCtx.LogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), autoscalingCtx.TemplateNodeInfoRegistry, clusterstate.WithScaleStateNotifier(scaleStateNotifier))
+	_ = clusterstate.NewClusterStateRegistry(provider, autoscalingCtx.LogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), autoscalingCtx.TemplateNodeInfoRegistry, clusterstate.WithScaleStateNotifier(scaleStateNotifier))
 	for _, bucket := range emptyNodeGroupViews {
 		for _, node := range bucket.Nodes {
 			err := autoscalingCtx.ClusterSnapshot.AddNodeInfo(framework.NewTestNodeInfo(node, tc.pods[node.Name]...))
@@ -1530,12 +1531,13 @@ func TestStartDeletionInBatchBasic(t *testing.T) {
 					}
 				}
 			}
-			opts := config.AutoscalingOptions{
-				MaxScaleDownParallelism:        10,
-				MaxDrainParallelism:            5,
-				MaxPodEvictionTime:             0,
-				DaemonSetEvictionForEmptyNodes: true,
-			}
+			opts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.MaxDrainParallelism = 5
+				o.MaxPodEvictionTime = 0
+				o.DaemonSetEvictionForEmptyNodes = true
+				// NewScaleTestAutoscalingContext does not set up a CSI provider.
+				o.CSINodeAwareSchedulingEnabled = false
+			})
 
 			podLister := kube_util.NewTestPodLister([]*apiv1.Pod{})
 			pdbLister := kube_util.NewTestPodDisruptionBudgetLister([]*policyv1.PodDisruptionBudget{})
@@ -1545,7 +1547,7 @@ func TestStartDeletionInBatchBasic(t *testing.T) {
 				t.Fatalf("Couldn't set up autoscaling context: %v", err)
 			}
 			scaleStateNotifier := nodegroupchange.NewNodeGroupChangeObserversList()
-			_ = clusterstate.NewClusterStateRegistry(provider, autoscalingCtx.LogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), autoscalingCtx.TemplateNodeInfoRegistry, clusterstate.WithScaleStateNotifier(scaleStateNotifier))
+			_ = clusterstate.NewClusterStateRegistry(provider, autoscalingCtx.LogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), autoscalingCtx.TemplateNodeInfoRegistry, clusterstate.WithScaleStateNotifier(scaleStateNotifier))
 			ndt := deletiontracker.NewNodeDeletionTracker(0)
 			ndb := NewNodeDeletionBatcher(&autoscalingCtx, scaleStateNotifier, ndt, deleteInterval)
 			legacyFlagDrainConfig := SingleRuleDrainConfig(autoscalingCtx.MaxGracefulTerminationSec)
@@ -1587,10 +1589,10 @@ func TestStartDeletionInBatchBasic(t *testing.T) {
 
 func sizedNodeGroup(id string, size int, atomic, ignoreDaemonSetUtil bool) *testprovider.TestNodeGroup {
 	ng := testprovider.NewTestNodeGroup(id, 1000, 0, size, true, false, "n1-standard-2", nil, nil)
-	ng.SetOptions(&config.NodeGroupAutoscalingOptions{
-		ZeroOrMaxNodeScaling:        atomic,
-		IgnoreDaemonSetsUtilization: ignoreDaemonSetUtil,
-	})
+	opts := config.DefaultNodeGroupAutoscalingOptions()
+	opts.ZeroOrMaxNodeScaling = atomic
+	opts.IgnoreDaemonSetsUtilization = ignoreDaemonSetUtil
+	ng.SetOptions(&opts)
 	return ng
 }
 

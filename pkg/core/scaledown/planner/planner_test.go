@@ -41,7 +41,6 @@ import (
 	"sigs.k8s.io/cluster-autoscaler/pkg/core/scaledown/status"
 	"sigs.k8s.io/cluster-autoscaler/pkg/core/scaledown/unremovable"
 	. "sigs.k8s.io/cluster-autoscaler/pkg/core/test"
-	"sigs.k8s.io/cluster-autoscaler/pkg/estimator"
 	processorstest "sigs.k8s.io/cluster-autoscaler/pkg/processors/test"
 	"sigs.k8s.io/cluster-autoscaler/pkg/simulator"
 	"sigs.k8s.io/cluster-autoscaler/pkg/simulator/clustersnapshot"
@@ -497,13 +496,9 @@ func TestUpdateClusterState(t *testing.T) {
 			for _, node := range tc.nodes {
 				provider.AddNode("ng1", node)
 			}
-			opts := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime: 10 * time.Minute,
-				},
-				ScaleDownSimulationTimeout: 1 * time.Second,
-				MaxScaleDownParallelism:    10,
-			}
+			opts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.ScaleDownSimulationTimeout = 1 * time.Second
+			})
 			processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(opts)
 			autoscalingCtx, err := NewScaleTestAutoscalingContext(opts, &fake.Clientset{}, registry, provider, nil, nil, templateNodeInfoRegistry)
 			assert.NoError(t, err)
@@ -614,9 +609,7 @@ func TestUpdateClusterStatUnneededNodesLimit(t *testing.T) {
 			maxUnneededTime:    1 * time.Minute,
 			updateInterval:     10 * time.Second,
 			wantUnneeded:       100,
-			opts: &config.NodeGroupAutoscalingOptions{
-				ZeroOrMaxNodeScaling: true,
-			},
+			opts:               atomicNodeGroupOptions(),
 		},
 		{
 			name:               "atomic sclale down - quick loops",
@@ -626,9 +619,7 @@ func TestUpdateClusterStatUnneededNodesLimit(t *testing.T) {
 			maxUnneededTime:    1 * time.Minute,
 			updateInterval:     1 * time.Second,
 			wantUnneeded:       100,
-			opts: &config.NodeGroupAutoscalingOptions{
-				ZeroOrMaxNodeScaling: true,
-			},
+			opts:               atomicNodeGroupOptions(),
 		},
 		{
 			name:               "atomic sclale down - slow loops",
@@ -638,9 +629,7 @@ func TestUpdateClusterStatUnneededNodesLimit(t *testing.T) {
 			maxUnneededTime:    1 * time.Minute,
 			updateInterval:     30 * time.Second,
 			wantUnneeded:       100,
-			opts: &config.NodeGroupAutoscalingOptions{
-				ZeroOrMaxNodeScaling: true,
-			},
+			opts:               atomicNodeGroupOptions(),
 		},
 		{
 			name:               "atomic sclale down - too many unneeded",
@@ -650,9 +639,7 @@ func TestUpdateClusterStatUnneededNodesLimit(t *testing.T) {
 			maxUnneededTime:    1 * time.Minute,
 			updateInterval:     30 * time.Second,
 			wantUnneeded:       100,
-			opts: &config.NodeGroupAutoscalingOptions{
-				ZeroOrMaxNodeScaling: true,
-			},
+			opts:               atomicNodeGroupOptions(),
 		},
 		{
 			name:               "atomic sclale down - no uneeded",
@@ -662,9 +649,7 @@ func TestUpdateClusterStatUnneededNodesLimit(t *testing.T) {
 			maxUnneededTime:    1 * time.Minute,
 			updateInterval:     30 * time.Second,
 			wantUnneeded:       100,
-			opts: &config.NodeGroupAutoscalingOptions{
-				ZeroOrMaxNodeScaling: true,
-			},
+			opts:               atomicNodeGroupOptions(),
 		},
 		{
 			name:               "atomic sclale down - short uneeded time and short update interval",
@@ -674,9 +659,7 @@ func TestUpdateClusterStatUnneededNodesLimit(t *testing.T) {
 			maxUnneededTime:    1 * time.Second,
 			updateInterval:     1 * time.Second,
 			wantUnneeded:       500,
-			opts: &config.NodeGroupAutoscalingOptions{
-				ZeroOrMaxNodeScaling: true,
-			},
+			opts:               atomicNodeGroupOptions(),
 		},
 	}
 	for _, tc := range testCases {
@@ -696,13 +679,11 @@ func TestUpdateClusterStatUnneededNodesLimit(t *testing.T) {
 			for _, node := range nodes {
 				provider.AddNode("ng1", node)
 			}
-			autoscalingOpts := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime: tc.maxUnneededTime,
-				},
-				ScaleDownSimulationTimeout: 1 * time.Hour,
-				MaxScaleDownParallelism:    tc.maxParallelism,
-			}
+			autoscalingOpts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnneededTime = tc.maxUnneededTime
+				o.ScaleDownSimulationTimeout = 1 * time.Hour
+				o.MaxScaleDownParallelism = tc.maxParallelism
+			})
 			processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(autoscalingOpts)
 			autoscalingCtx, err := NewScaleTestAutoscalingContext(autoscalingOpts, &fake.Clientset{}, nil, provider, nil, nil, templateNodeInfoRegistry)
 			assert.NoError(t, err)
@@ -806,21 +787,16 @@ func TestNewPlannerWithExistingDeletionCandidateNodes(t *testing.T) {
 			readyNodeLister.SetNodes(tc.allNodes)
 			allNodeLister.SetNodes(tc.allNodes)
 
-			autoscalingOptions := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime:         time.Minute,
-					ScaleDownUnreadyTime:          time.Minute,
-					ScaleDownUtilizationThreshold: 0.5,
-					MaxNodeProvisionTime:          10 * time.Second,
-				},
-				EstimatorName:            estimator.BinpackingEstimatorName,
-				EnforceNodeGroupMinSize:  true,
-				ScaleDownEnabled:         true,
-				MaxNodesTotal:            100,
-				MaxCoresTotal:            100,
-				MaxMemoryTotal:           100000,
-				NodeDeletionCandidateTTL: tc.nodeDeletionCandidateTTL,
-			}
+			autoscalingOptions := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+				o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+				o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+				o.EnforceNodeGroupMinSize = true
+				o.MaxNodesTotal = 100
+				o.MaxCoresTotal = 100
+				o.MaxMemoryTotal = 100000
+				o.NodeDeletionCandidateTTL = tc.nodeDeletionCandidateTTL
+			})
 
 			provider := testprovider.NewTestCloudProviderBuilder().Build()
 			for _, node := range tc.allNodes {
@@ -1099,13 +1075,10 @@ func TestNodesToDelete(t *testing.T) {
 					provider.AddNode(ng, node)
 				}
 			}
-			autoscalingOpts := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime: 10 * time.Minute,
-					ScaleDownUnreadyTime:  0 * time.Minute,
-				},
-				ScaleDownSimulationTimeout: 5 * time.Minute,
-			}
+			autoscalingOpts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnreadyTime = 0 * time.Minute
+				o.ScaleDownSimulationTimeout = 5 * time.Minute
+			})
 			processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(autoscalingOpts)
 			autoscalingCtx, err := NewScaleTestAutoscalingContext(autoscalingOpts, &fake.Clientset{}, nil, provider, nil, nil, templateNodeInfoRegistry)
 			assert.NoError(t, err)
@@ -1145,10 +1118,17 @@ func TestNodesToDelete(t *testing.T) {
 
 func sizedNodeGroup(id string, size int, atomic bool) cloudprovider.NodeGroup {
 	ng := testprovider.NewTestNodeGroup(id, 10000, 0, size, true, false, "n1-standard-2", nil, nil)
-	ng.SetOptions(&config.NodeGroupAutoscalingOptions{
-		ZeroOrMaxNodeScaling: atomic,
-	})
+	opts := config.DefaultNodeGroupAutoscalingOptions()
+	opts.ZeroOrMaxNodeScaling = atomic
+	ng.SetOptions(&opts)
 	return ng
+}
+
+// atomicNodeGroupOptions returns default node group options with ZeroOrMaxNodeScaling enabled.
+func atomicNodeGroupOptions() *config.NodeGroupAutoscalingOptions {
+	opts := config.DefaultNodeGroupAutoscalingOptions()
+	opts.ZeroOrMaxNodeScaling = true
+	return &opts
 }
 
 func buildRemovableNode(name string, podCount int) simulator.NodeToBeRemoved {
@@ -1285,7 +1265,7 @@ func TestAtomicScaleDownNodeNilGroup(t *testing.T) {
 	provider := testprovider.NewTestCloudProviderBuilder().Build()
 	// n1 is not added to any node group in the provider
 
-	autoscalingOptions := config.AutoscalingOptions{}
+	autoscalingOptions := config.DefaultAutoscalingOptions()
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(autoscalingOptions)
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(autoscalingOptions, &fake.Clientset{}, nil, provider, nil, nil, templateNodeInfoRegistry)
 	assert.NoError(t, err)

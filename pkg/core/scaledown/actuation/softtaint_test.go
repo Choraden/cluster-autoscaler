@@ -63,10 +63,9 @@ func TestSoftTaintUpdate(t *testing.T) {
 	provider.AddNode("ng1", n2000)
 	assert.NotNil(t, provider)
 
-	options := config.AutoscalingOptions{
-		MaxBulkSoftTaintCount: 1,
-		MaxBulkSoftTaintTime:  3 * time.Second,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxBulkSoftTaintCount = 1
+	})
 	registry := kube_util.NewListerRegistry(nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	actx, err := test.NewScaleTestAutoscalingContext(options, fakeClient, registry, provider, nil, nil, nil)
@@ -147,10 +146,9 @@ func TestSoftTaintTimeLimit(t *testing.T) {
 	provider.AddNode("ng1", n2)
 	assert.NotNil(t, provider)
 
-	options := config.AutoscalingOptions{
-		MaxBulkSoftTaintCount: 10,
-		MaxBulkSoftTaintTime:  maxSoftTaintDuration,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxBulkSoftTaintTime = maxSoftTaintDuration
+	})
 	registry := kube_util.NewListerRegistry(nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	actx, err := test.NewScaleTestAutoscalingContext(options, fakeClient, registry, provider, nil, nil, nil)

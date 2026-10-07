@@ -402,7 +402,9 @@ func TestFilterOutSchedulable_GracefulDegradation(t *testing.T) {
 			clusterSnapshot.Fork()
 
 			ctx := context.Background()
-			opts := config.AutoscalingOptions{PendingPodsBatchingTimeout: tc.simulationTimeout}
+			opts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.PendingPodsBatchingTimeout = tc.simulationTimeout
+			})
 			fakeClientSet := fake.NewSimpleClientset()
 			fakeInformerFactory := informers.NewSharedInformerFactory(fakeClientSet, 0)
 			kubeClients := ca_context.NewAutoscalingKubeClients(ctx, opts, fakeClientSet, fakeInformerFactory)

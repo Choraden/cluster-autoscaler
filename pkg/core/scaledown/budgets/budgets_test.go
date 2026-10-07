@@ -445,12 +445,11 @@ func TestCropNodesToBudgets(t *testing.T) {
 				allNodes = append(allNodes, bucket.Nodes...)
 			}
 
-			options := config.AutoscalingOptions{
-				MaxScaleDownParallelism:     10,
-				MaxDrainParallelism:         5,
-				NodeDeletionBatcherInterval: 0 * time.Second,
-				NodeDeleteDelayAfterTaint:   1 * time.Second,
-			}
+			options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.MaxDrainParallelism = 5
+				o.NodeDeletionBatcherInterval = 0 * time.Second
+				o.NodeDeleteDelayAfterTaint = 1 * time.Second
+			})
 
 			autoscalingCtx, err := test.NewScaleTestAutoscalingContext(options, &fake.Clientset{}, nil, provider, nil, nil, nil)
 			assert.NoError(t, err)
@@ -495,9 +494,9 @@ var transformNodeGroupView = cmp.Transformer("transformNodeGroupView", func(b No
 
 func sizedNodeGroup(id string, size int, atomic bool) cloudprovider.NodeGroup {
 	ng := testprovider.NewTestNodeGroup(id, 10000, 0, size, true, false, "n1-standard-2", nil, nil)
-	ng.SetOptions(&config.NodeGroupAutoscalingOptions{
-		ZeroOrMaxNodeScaling: atomic,
-	})
+	opts := config.DefaultNodeGroupAutoscalingOptions()
+	opts.ZeroOrMaxNodeScaling = atomic
+	ng.SetOptions(&opts)
 	return ng
 }
 

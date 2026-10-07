@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/cluster-autoscaler/pkg/simulator/framework"
 
 	"sigs.k8s.io/cluster-autoscaler/pkg/cloudprovider"
-	"sigs.k8s.io/cluster-autoscaler/pkg/config"
 	"sigs.k8s.io/cluster-autoscaler/pkg/core/scaledown/deletiontracker"
 	"sigs.k8s.io/cluster-autoscaler/pkg/core/scaledown/status"
 	"sigs.k8s.io/cluster-autoscaler/pkg/metrics"
@@ -97,7 +96,7 @@ func (ds *GroupDeletionScheduler) scheduleDeletion(ctx context.Context, nodeInfo
 		return
 	}
 	if opts == nil {
-		opts = &config.NodeGroupAutoscalingOptions{}
+		opts = &ds.autoscalingCtx.NodeGroupDefaults
 	}
 
 	nodeDeleteResult := ds.prepareNodeForDeletion(ctx, nodeInfo, drain, force)

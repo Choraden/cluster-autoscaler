@@ -42,15 +42,11 @@ func TestDelegatingNodeGroupConfigProcessor(t *testing.T) {
 	var GLOBAL Want = 1
 	var NG Want = 2
 
-	globalOpts := config.NodeGroupAutoscalingOptions{
-		ScaleDownUnneededTime:            3 * time.Minute,
-		ScaleDownUnreadyTime:             4 * time.Minute,
-		ScaleDownGpuUtilizationThreshold: 0.6,
-		ScaleDownUtilizationThreshold:    0.5,
-		MaxNodeProvisionTime:             15 * time.Minute,
-		MaxNodeStartupTime:               15 * time.Minute,
-		IgnoreDaemonSetsUtilization:      true,
-	}
+	globalOpts := config.DefaultNodeGroupAutoscalingOptions()
+	globalOpts.ScaleDownUnneededTime = 3 * time.Minute
+	globalOpts.ScaleDownUnreadyTime = 4 * time.Minute
+	globalOpts.ScaleDownGpuUtilizationThreshold = 0.6
+	globalOpts.IgnoreDaemonSetsUtilization = true
 	ngOpts := &config.NodeGroupAutoscalingOptions{
 		ScaleDownUnneededTime:            10 * time.Minute,
 		ScaleDownUnreadyTime:             11 * time.Minute,

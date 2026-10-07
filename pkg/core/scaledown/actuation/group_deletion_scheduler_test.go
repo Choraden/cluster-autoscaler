@@ -139,7 +139,7 @@ func TestScheduleDeletion(t *testing.T) {
 
 			batcher := &countingBatcher{}
 			tracker := deletiontracker.NewNodeDeletionTracker(0)
-			opts := config.AutoscalingOptions{}
+			opts := config.DefaultAutoscalingOptions()
 			fakeClient := &fake.Clientset{}
 			podLister := kube_util.NewTestPodLister([]*apiv1.Pod{})
 			pdbLister := kube_util.NewTestPodDisruptionBudgetLister([]*policyv1.PodDisruptionBudget{})

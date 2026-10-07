@@ -712,10 +712,10 @@ func TestCountNodeTaints(t *testing.T) {
 			Conditions: []apiv1.NodeCondition{},
 		},
 	}
-	taintConfig := NewTaintConfig(config.AutoscalingOptions{
-		StatusTaints:  []string{"status-me"},
-		StartupTaints: []string{"ignore-me"},
-	})
+	taintConfig := NewTaintConfig(config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.StatusTaints = []string{"status-me"}
+		o.StartupTaints = []string{"ignore-me"}
+	}))
 	want := map[string]int{
 		"ignore-taint.cluster-autoscaler.kubernetes.io/": 2,
 		"ToBeDeletedByClusterAutoscaler":                 1,
@@ -989,9 +989,9 @@ func TestNewTaintConfigWithCustomPrefixes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := config.AutoscalingOptions{
-				StartupTaintPrefixes: tc.startupTaintPrefixes,
-			}
+			opts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.StartupTaintPrefixes = tc.startupTaintPrefixes
+			})
 			taintConfig := NewTaintConfig(opts)
 
 			result := taintConfig.IsStartupTaint(tc.taintKeyToTest)

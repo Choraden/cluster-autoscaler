@@ -296,7 +296,7 @@ func TestBookCapacity(t *testing.T) {
 				maxUpdated: 20,
 				injector:   injector,
 			}
-			autoscalingCtx, _ := NewScaleTestAutoscalingContext(config.AutoscalingOptions{}, nil, nil, nil, nil, nil, nil)
+			autoscalingCtx, _ := NewScaleTestAutoscalingContext(config.DefaultAutoscalingOptions(), nil, nil, nil, nil, nil, nil)
 			processor.bookCapacity(context.Background(), &autoscalingCtx)
 			if (test.capacityIsBooked && len(injector.pods) == 0) || (!test.capacityIsBooked && len(injector.pods) > 0) {
 				t.Fail()
@@ -332,7 +332,7 @@ func TestBookCapacityConsumed(t *testing.T) {
 			injector := &fakeInjector{pods: []*apiv1.Pod{}}
 			client := provreqclient.NewFakeProvisioningRequestClient(context.Background(), t, provReq)
 			processor := &provReqProcessor{now: time.Now, client: client, maxUpdated: 20, injector: injector}
-			autoscalingCtx, _ := NewScaleTestAutoscalingContext(config.AutoscalingOptions{}, nil, nil, nil, nil, nil, nil)
+			autoscalingCtx, _ := NewScaleTestAutoscalingContext(config.DefaultAutoscalingOptions(), nil, nil, nil, nil, nil, nil)
 			if err := autoscalingCtx.ClusterSnapshot.SetClusterState(context.Background(), []*apiv1.Node{node}, scheduledPods, nil, nil); err != nil {
 				t.Fatalf("failed to set cluster state: %v", err)
 			}

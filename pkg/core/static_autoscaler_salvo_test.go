@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/cluster-autoscaler/pkg/clusterstate"
 	"sigs.k8s.io/cluster-autoscaler/pkg/config"
-	"sigs.k8s.io/cluster-autoscaler/pkg/estimator"
 	"sigs.k8s.io/cluster-autoscaler/pkg/simulator/framework"
 	"sigs.k8s.io/cluster-autoscaler/pkg/utils/annotations"
 	. "sigs.k8s.io/cluster-autoscaler/pkg/utils/test"
@@ -81,23 +80,18 @@ func TestStaticAutoscalerSalvoScaleUp(t *testing.T) {
 				{name: "ng1", nodes: []*apiv1.Node{n1}, template: tni1, min: 1, max: 10},
 				{name: "ng2", nodes: []*apiv1.Node{n2}, template: tni2, min: 1, max: 10},
 			},
-			autoscalingOptions: config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime:         time.Minute,
-					ScaleDownUnreadyTime:          time.Minute,
-					ScaleDownUtilizationThreshold: 0.5,
-					MaxNodeProvisionTime:          10 * time.Second,
-				},
-				EstimatorName:           estimator.BinpackingEstimatorName,
-				EnforceNodeGroupMinSize: true,
-
-				MaxNodesTotal:                  10,
-				MaxCoresTotal:                  100,
-				MaxMemoryTotal:                 100000,
-				MaxNodeGroupBinpackingDuration: 1 * time.Second,
-				SalvoScaleUp:                   salvoEnabled,
-				SalvoScaleUpBudget:             salvoBudget,
-			},
+			autoscalingOptions: config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+				o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+				o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+				o.EnforceNodeGroupMinSize = true
+				o.MaxNodesTotal = 10
+				o.MaxCoresTotal = 100
+				o.MaxMemoryTotal = 100000
+				o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+				o.SalvoScaleUp = salvoEnabled
+				o.SalvoScaleUpBudget = salvoBudget
+			}),
 			clusterStateConfig: clusterstate.ClusterStateRegistryConfig{
 				OkTotalUnreadyCount: 1,
 			},

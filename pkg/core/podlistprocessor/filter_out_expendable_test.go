@@ -82,9 +82,9 @@ func TestFilterOutExpendable(t *testing.T) {
 
 			pods, err := processor.Process(context.Background(), &ca_context.AutoscalingContext{
 				ClusterSnapshot: snapshot,
-				AutoscalingOptions: config.AutoscalingOptions{
-					ExpendablePodsPriorityCutoff: tc.priorityCutoff,
-				},
+				AutoscalingOptions: config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+					o.ExpendablePodsPriorityCutoff = tc.priorityCutoff
+				}),
 				AutoscalingKubeClients: ca_context.AutoscalingKubeClients{
 					ListerRegistry: newMockListerRegistry(tc.nodes),
 				},

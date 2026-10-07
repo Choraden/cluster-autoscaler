@@ -42,7 +42,6 @@ import (
 	"sigs.k8s.io/cluster-autoscaler/pkg/config"
 	ca_context "sigs.k8s.io/cluster-autoscaler/pkg/context"
 	scaledownstatus "sigs.k8s.io/cluster-autoscaler/pkg/core/scaledown/status"
-	"sigs.k8s.io/cluster-autoscaler/pkg/estimator"
 	"sigs.k8s.io/cluster-autoscaler/pkg/processors/status"
 	"sigs.k8s.io/cluster-autoscaler/pkg/simulator"
 	"sigs.k8s.io/cluster-autoscaler/pkg/simulator/framework"
@@ -397,30 +396,29 @@ func TestStaticAutoscalerDynamicResources(t *testing.T) {
 			mocks.deviceClassLister = &fakeAllObjectsLister[*resourceapi.DeviceClass]{objects: []*resourceapi.DeviceClass{defaultDeviceClass}}
 
 			setupConfig := &autoscalerSetupConfig{
-				autoscalingOptions: config.AutoscalingOptions{
-					NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-						ScaleDownUnneededTime:         time.Minute,
-						ScaleDownUnreadyTime:          time.Minute,
-						ScaleDownUtilizationThreshold: 0.7,
-						MaxNodeProvisionTime:          time.Hour,
-					},
-					EstimatorName:                    estimator.BinpackingEstimatorName,
-					MaxBinpackingTime:                1 * time.Hour,
-					MaxNodeGroupBinpackingDuration:   1 * time.Hour,
-					ScaleDownSimulationTimeout:       1 * time.Hour,
-					OkTotalUnreadyCount:              9999999,
-					MaxTotalUnreadyPercentage:        1.0,
-					ScaleDownEnabled:                 true,
-					MaxScaleDownParallelism:          10,
-					MaxDrainParallelism:              10,
-					NodeDeletionBatcherInterval:      0 * time.Second,
-					NodeDeleteDelayAfterTaint:        1 * time.Millisecond,
-					MaxNodesTotal:                    1000,
-					MaxCoresTotal:                    1000,
-					MaxMemoryTotal:                   100000000,
-					ScaleUpFromZero:                  true,
-					DynamicResourceAllocationEnabled: true,
-				},
+				autoscalingOptions: config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+					o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+					o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+					o.NodeGroupDefaults.ScaleDownUtilizationThreshold = 0.7
+					o.NodeGroupDefaults.MaxNodeProvisionTime = time.Hour
+					o.MaxBinpackingTime = 1 * time.Hour
+					o.MaxNodeGroupBinpackingDuration = 1 * time.Hour
+					o.ScaleDownSimulationTimeout = 1 * time.Hour
+					o.OkTotalUnreadyCount = 9999999
+					o.MaxTotalUnreadyPercentage = 1.0
+					o.MaxDrainParallelism = 10
+					o.NodeDeletionBatcherInterval = 0 * time.Second
+					o.NodeDeleteDelayAfterTaint = 1 * time.Millisecond
+					o.MaxNodesTotal = 1000
+					o.MaxCoresTotal = 1000
+					o.MaxMemoryTotal = 100000000
+					// The test setup doesn't provide a CSI provider.
+					o.CSINodeAwareSchedulingEnabled = false
+					// The test mocks don't provide a ReplicaSet lister required by the replica count drainability rule.
+					o.SkipNodesWithCustomControllerPods = false
+					// Re-check unremovable nodes on every loop, as the test scenarios rely on it.
+					o.UnremovableNodeRecheckTimeout = 0
+				}),
 				nodeGroups:             nodeGroups,
 				nodeStateUpdateTime:    now,
 				mocks:                  mocks,

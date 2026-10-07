@@ -331,15 +331,14 @@ func TestGetOptions(t *testing.T) {
 	}
 
 	// dummy values
-	autoscalingOptions := config.NodeGroupAutoscalingOptions{
-		ScaleDownUtilizationThreshold:    50.0,
-		ScaleDownGpuUtilizationThreshold: 50.0,
-		ScaleDownUnneededTime:            time.Minute * 5,
-		ScaleDownUnreadyTime:             time.Minute * 5,
-		MaxNodeProvisionTime:             time.Minute * 5,
-		ZeroOrMaxNodeScaling:             true,
-		IgnoreDaemonSetsUtilization:      true,
-	}
+	autoscalingOptions := config.DefaultNodeGroupAutoscalingOptions()
+	autoscalingOptions.ScaleDownUtilizationThreshold = 50.0
+	autoscalingOptions.ScaleDownGpuUtilizationThreshold = 50.0
+	autoscalingOptions.ScaleDownUnneededTime = time.Minute * 5
+	autoscalingOptions.ScaleDownUnreadyTime = time.Minute * 5
+	autoscalingOptions.MaxNodeProvisionTime = time.Minute * 5
+	autoscalingOptions.ZeroOrMaxNodeScaling = true
+	autoscalingOptions.IgnoreDaemonSetsUtilization = true
 
 	// usual case
 	opts, err := ng.GetOptions(context.Background(), autoscalingOptions)

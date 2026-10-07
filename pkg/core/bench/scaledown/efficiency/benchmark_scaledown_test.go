@@ -60,16 +60,18 @@ type scaleDownDependencies struct {
 }
 
 func defaultAutoscalingOptions() config.AutoscalingOptions {
-	return config.AutoscalingOptions{
-		ScaleDownEnabled:           true,
-		MaxScaleDownParallelism:    1,
-		MaxDrainParallelism:        1,
-		ScaleDownSimulationTimeout: 10 * time.Second,
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUtilizationThreshold: 1.0,
-			ScaleDownUnneededTime:         0,
-		},
-	}
+	return config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.ScaleDownEnabled = true
+		o.MaxScaleDownParallelism = 1
+		o.MaxDrainParallelism = 1
+		o.ScaleDownSimulationTimeout = 10 * time.Second
+		o.NodeGroupDefaults.ScaleDownUtilizationThreshold = 1.0
+		o.NodeGroupDefaults.ScaleDownUnneededTime = 0
+		// Keep the measured planner code paths unchanged: these scenarios
+		// exercise neither DRA nor CSI-aware scheduling.
+		o.DynamicResourceAllocationEnabled = false
+		o.CSINodeAwareSchedulingEnabled = false
+	})
 }
 
 func buildScaleDownDependencies(b *testing.B, cs *initialClusterState, autoscalingOpts config.AutoscalingOptions) scaleDownDependencies {

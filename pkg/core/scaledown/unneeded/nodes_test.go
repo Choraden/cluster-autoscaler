@@ -261,7 +261,9 @@ func TestRemovableAt(t *testing.T) {
 			rsLister, err := kube_util.NewTestReplicaSetLister(nil)
 			assert.NoError(t, err)
 			registry := kube_util.NewListerRegistry(nil, nil, nil, nil, nil, nil, nil, rsLister, nil)
-			autoscalingCtx, err := NewScaleTestAutoscalingContext(config.AutoscalingOptions{ScaleDownSimulationTimeout: 5 * time.Minute}, &fake.Clientset{}, registry, provider, nil, nil, nil)
+			autoscalingCtx, err := NewScaleTestAutoscalingContext(config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.ScaleDownSimulationTimeout = 5 * time.Minute
+			}), &fake.Clientset{}, registry, provider, nil, nil, nil)
 			assert.NoError(t, err)
 			expectedThreshold := 5 * time.Minute
 			fakeTimeGetter := &fakeScaleDownTimeGetter{
@@ -453,9 +455,9 @@ func TestRemovableAt_UnremovableReasons(t *testing.T) {
 
 			autoscalingCtx := ca_context.AutoscalingContext{
 				CloudProvider: provider,
-				AutoscalingOptions: config.AutoscalingOptions{
-					ScaleDownSimulationTimeout: testScaleDownTimeout,
-				},
+				AutoscalingOptions: config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+					o.ScaleDownSimulationTimeout = testScaleDownTimeout
+				}),
 			}
 
 			var timeGetter scaleDownTimeGetter
@@ -575,7 +577,9 @@ func TestNodeLoadFromExistingTaints(t *testing.T) {
 			readyNodeLister.SetNodes(tc.allNodes)
 
 			provider := testprovider.NewTestCloudProviderBuilder().Build()
-			ctx := &ca_context.AutoscalingContext{CloudProvider: provider, AutoscalingOptions: config.AutoscalingOptions{NodeDeletionCandidateTTL: tc.nodeDeletionCandidateTTL}}
+			ctx := &ca_context.AutoscalingContext{CloudProvider: provider, AutoscalingOptions: config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeDeletionCandidateTTL = tc.nodeDeletionCandidateTTL
+			})}
 			ctx.ListerRegistry = kube_util.NewListerRegistry(allNodeLister, readyNodeLister,
 				nil, nil, nil, nil, nil, nil, nil)
 			nodes.LoadFromExistingTaints(ctx, currentTime)

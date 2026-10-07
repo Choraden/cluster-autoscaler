@@ -49,6 +49,20 @@ import (
 	"sigs.k8s.io/cluster-autoscaler/pkg/utils/backoff"
 )
 
+// nodeGroupOptionsWithProvisionTime returns default node group options with the given MaxNodeProvisionTime.
+func nodeGroupOptionsWithProvisionTime(d time.Duration) config.NodeGroupAutoscalingOptions {
+	opts := config.DefaultNodeGroupAutoscalingOptions()
+	opts.MaxNodeProvisionTime = d
+	return opts
+}
+
+// nodeGroupOptionsWithStartupTime returns default node group options with the given MaxNodeStartupTime.
+func nodeGroupOptionsWithStartupTime(d time.Duration) config.NodeGroupAutoscalingOptions {
+	opts := config.DefaultNodeGroupAutoscalingOptions()
+	opts.MaxNodeStartupTime = d
+	return opts
+}
+
 // GetCloudProviderDeletedNodeNames returns a list of the names of nodes removed
 // from cloud provider but registered in Kubernetes.
 func GetCloudProviderDeletedNodeNames(csr *ClusterStateRegistry) []string {
@@ -102,7 +116,7 @@ func TestOKWithScaleUp(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: time.Minute}),
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(time.Minute)),
 		&emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 			MaxTotalUnreadyPercentage: 10,
 			OkTotalUnreadyCount:       1,
@@ -143,7 +157,7 @@ func TestEmptyOK(t *testing.T) {
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
 
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: time.Minute}),
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(time.Minute)),
 		&emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 			MaxTotalUnreadyPercentage: 10,
 			OkTotalUnreadyCount:       1,
@@ -186,7 +200,7 @@ func TestHasNodeGroupStartedScaleUp(t *testing.T) {
 			provider.AddNodeGroup("ng1", 0, 5, tc.initialSize)
 			fakeClient := &fake.Clientset{}
 			fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-			clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: time.Minute}),
+			clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(time.Minute)),
 				&emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 					MaxTotalUnreadyPercentage: 10,
 					OkTotalUnreadyCount:       1,
@@ -264,7 +278,7 @@ func TestRecalculateStateAfterNodeGroupSizeChanged(t *testing.T) {
 			provider.AddNodeGroup(ngName, 0, 1000, tc.newTarget)
 
 			fakeLogRecorder, _ := utils.NewStatusMapRecorder(&fake.Clientset{}, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-			clusterState := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{}), &emptyTemplateNodeInfoRegistry{})
+			clusterState := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{})
 			clusterState.acceptableRanges = map[string]AcceptableRange{ngName: tc.acceptableRange}
 			clusterState.perNodeGroupReadiness = map[string]Readiness{ngName: tc.readiness}
 			if tc.scaleUpRequest != nil {
@@ -300,7 +314,7 @@ func TestOKOneUnreadyNode(t *testing.T) {
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
 
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -336,7 +350,7 @@ func TestNodeWithoutNodeGroupDontCrash(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -364,7 +378,7 @@ func TestOKOneUnreadyNodeWithScaleDownCandidate(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -419,7 +433,7 @@ func TestMissingNodes(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -460,7 +474,7 @@ func TestTooManyUnready(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute, MaxNodeStartupTime: 35 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithStartupTime(35*time.Minute)), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -489,7 +503,7 @@ func TestUnreadyLongAfterCreation(t *testing.T) {
 	assert.NotNil(t, provider)
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "some-map")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -520,7 +534,7 @@ func TestUnreadyAfterCreationWithIncreasedStartupTime(t *testing.T) {
 	assert.NotNil(t, provider)
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "some-map")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute, MaxNodeStartupTime: 35 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithStartupTime(35*time.Minute)), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -552,7 +566,7 @@ func TestNotStarted(t *testing.T) {
 	assert.NotNil(t, provider)
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "some-map")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute, MaxNodeStartupTime: 35 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithStartupTime(35*time.Minute)), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -627,7 +641,7 @@ func TestRegisterScaleDown(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute, MaxNodeStartupTime: 35 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithStartupTime(35*time.Minute)), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -645,7 +659,7 @@ func TestNodeGroupScaleUpTime(t *testing.T) {
 
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -721,7 +735,7 @@ func TestUpcomingNodes(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute, MaxNodeStartupTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -772,7 +786,7 @@ func TestTaintBasedNodeDeletion(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 	scaleUpFailuresRegistry := scaleupfailures.NewRegistry()
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}), withNotifiedScaleUpFailuresRegistry(scaleUpFailuresRegistry))
@@ -793,7 +807,7 @@ func TestIncorrectSize(t *testing.T) {
 	assert.NotNil(t, provider)
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -830,7 +844,7 @@ func TestUnregisteredNodes(t *testing.T) {
 
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 10 * time.Second}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(10*time.Second)), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -881,7 +895,7 @@ func TestCloudProviderDeletedNodes(t *testing.T) {
 
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 10 * time.Second}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(10*time.Second)), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -986,7 +1000,7 @@ func TestScaleUpBackoff(t *testing.T) {
 		"ng1": framework.NewNodeInfo(ng1_1, nil),
 	}
 	registry := newMockTemplateNodeInfoRegistry(nodeInfos)
-	nodeGroupConfigProcessor := nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 2 * time.Minute})
+	nodeGroupConfigProcessor := nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(2 * time.Minute))
 	clusterstate := NewNotifiedClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodeGroupConfigProcessor, registry, withMetrics(mockMetrics, provider), WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
@@ -1116,7 +1130,7 @@ func TestGetClusterSize(t *testing.T) {
 
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 		MaxTotalUnreadyPercentage: 10,
 		OkTotalUnreadyCount:       1,
 	}))
@@ -1163,7 +1177,7 @@ func TestUpdateScaleUp(t *testing.T) {
 		provider,
 		fakeLogRecorder,
 		newBackoff(),
-		nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 10 * time.Second}),
+		nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(10*time.Second)),
 		&emptyTemplateNodeInfoRegistry{},
 		WithConfig(ClusterStateRegistryConfig{
 			MaxTotalUnreadyPercentage: 10,
@@ -1615,7 +1629,7 @@ func TestIsNodeGroupRegistered(t *testing.T) {
 		provider,
 		fakeLogRecorder,
 		newBackoff(),
-		nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}),
+		nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()),
 		&emptyTemplateNodeInfoRegistry{},
 		WithConfig(ClusterStateRegistryConfig{MaxTotalUnreadyPercentage: 10, OkTotalUnreadyCount: 1}),
 	)
@@ -1701,7 +1715,7 @@ func TestUpcomingNodesFromUpcomingNodeGroups(t *testing.T) {
 			provider,
 			fakeLogRecorder,
 			newBackoff(),
-			nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}),
+			nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()),
 			&emptyTemplateNodeInfoRegistry{},
 			WithConfig(ClusterStateRegistryConfig{MaxTotalUnreadyPercentage: 10, OkTotalUnreadyCount: 1}),
 			WithAsyncNodeGroupStateChecker(&asyncnodegroups.MockAsyncNodeGroupStateChecker{IsUpcomingNodeGroup: tc.isUpcomingMockMap}),
@@ -1760,7 +1774,7 @@ func TestHandleInstanceCreationErrors(t *testing.T) {
 	mockedNodeGroup.On("TargetSize").Return(1, nil)
 	node := BuildTestNode("ng1_1", 1000, 1000)
 	mockedNodeGroup.On("TemplateNodeInfo").Return(framework.NewTestNodeInfo(node), nil)
-	mockedNodeGroup.On("GetOptions", mock.Anything).Return(&config.NodeGroupAutoscalingOptions{}, nil)
+	mockedNodeGroup.On("GetOptions", mock.Anything).Return(new(config.DefaultNodeGroupAutoscalingOptions()), nil)
 	provider.InsertNodeGroup(mockedNodeGroup)
 
 	fakeClient := &fake.Clientset{}
@@ -1814,7 +1828,7 @@ func TestFailedScaleUpWithDra(t *testing.T) {
 		},
 	}
 	mockedNodeGroup.On("TemplateNodeInfo").Return(nodeInfo, nil)
-	mockedNodeGroup.On("GetOptions", mock.Anything).Return(&config.NodeGroupAutoscalingOptions{}, nil)
+	mockedNodeGroup.On("GetOptions", mock.Anything).Return(new(config.DefaultNodeGroupAutoscalingOptions()), nil)
 	provider.InsertNodeGroup(mockedNodeGroup)
 
 	fakeClient := &fake.Clientset{}
@@ -1875,7 +1889,7 @@ func TestFailedScaleUpWithDraAndGpu(t *testing.T) {
 		},
 	}
 	mockedNodeGroup.On("TemplateNodeInfo").Return(nodeInfo, nil)
-	mockedNodeGroup.On("GetOptions", mock.Anything).Return(&config.NodeGroupAutoscalingOptions{}, nil)
+	mockedNodeGroup.On("GetOptions", mock.Anything).Return(new(config.DefaultNodeGroupAutoscalingOptions()), nil)
 	provider.InsertNodeGroup(mockedNodeGroup)
 
 	fakeClient := &fake.Clientset{}
@@ -1912,7 +1926,7 @@ func TestGetUpcomingNodesSkipsWithoutScaleUpRequestOrBackoff(t *testing.T) {
 	t.Run("no scale-up request means no upcoming nodes", func(t *testing.T) {
 		clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(),
 			nodegroupconfig.NewDefaultNodeGroupConfigProcessor(
-				config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
+				config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{}, WithConfig(ClusterStateRegistryConfig{
 				MaxTotalUnreadyPercentage: 10,
 				OkTotalUnreadyCount:       1,
 			}))
@@ -1930,7 +1944,7 @@ func TestGetUpcomingNodesSkipsWithoutScaleUpRequestOrBackoff(t *testing.T) {
 	t.Run("with active scale-up request upcoming nodes are counted", func(t *testing.T) {
 		clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(),
 			nodegroupconfig.NewDefaultNodeGroupConfigProcessor(
-				config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{},
+				config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{},
 			WithConfig(ClusterStateRegistryConfig{
 				MaxTotalUnreadyPercentage: 10,
 				OkTotalUnreadyCount:       1,
@@ -1955,7 +1969,7 @@ func TestGetUpcomingNodesSkipsWithoutScaleUpRequestOrBackoff(t *testing.T) {
 			"ng1": framework.NewNodeInfo(ng1_1, nil),
 		}
 		registry := newMockTemplateNodeInfoRegistry(nodeInfos)
-		nodeGroupConfigProcessor := nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 2 * time.Minute})
+		nodeGroupConfigProcessor := nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(2 * time.Minute))
 		clusterstate := NewNotifiedClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodeGroupConfigProcessor, registry, withMetrics(mockMetrics, provider), WithConfig(ClusterStateRegistryConfig{
 			MaxTotalUnreadyPercentage: 10,
 			OkTotalUnreadyCount:       1,
@@ -2011,7 +2025,7 @@ func TestSuspendedNodes(t *testing.T) {
 
 	fakeClient := &fake.Clientset{}
 	fakeLogRecorder, _ := utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
-	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute}), &emptyTemplateNodeInfoRegistry{},
+	clusterstate := NewClusterStateRegistry(provider, fakeLogRecorder, newBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), &emptyTemplateNodeInfoRegistry{},
 		WithConfig(ClusterStateRegistryConfig{MaxTotalUnreadyPercentage: 10, OkTotalUnreadyCount: 1}))
 
 	err := clusterstate.UpdateNodes(context.Background(), []*apiv1.Node{ng1_1, ng1_2}, now)
@@ -2118,7 +2132,7 @@ func TestExpiredScaleUpRevertsTargetSize(t *testing.T) {
 	mockedNodeGroup.On("TargetSize").Return(5, nil)
 	node := BuildTestNode("ng1_1", 1000, 1000)
 	mockedNodeGroup.On("TemplateNodeInfo").Return(framework.NewTestNodeInfo(node), nil)
-	mockedNodeGroup.On("GetOptions", mock.Anything).Return(&config.NodeGroupAutoscalingOptions{}, nil)
+	mockedNodeGroup.On("GetOptions", mock.Anything).Return(new(nodeGroupOptionsWithProvisionTime(0)), nil) // Zero provision time makes the scale-up expire immediately.
 	mockedNodeGroup.On("DecreaseTargetSize", -4).Return(nil)
 	provider.InsertNodeGroup(mockedNodeGroup)
 
@@ -2180,7 +2194,7 @@ func TestExpiredScaleUpRevertsTargetSizeHandlesError(t *testing.T) {
 	mockedNodeGroup.On("TargetSize").Return(5, nil)
 	node := BuildTestNode("ng1_1", 1000, 1000)
 	mockedNodeGroup.On("TemplateNodeInfo").Return(framework.NewTestNodeInfo(node), nil)
-	mockedNodeGroup.On("GetOptions", mock.Anything).Return(&config.NodeGroupAutoscalingOptions{}, nil)
+	mockedNodeGroup.On("GetOptions", mock.Anything).Return(new(nodeGroupOptionsWithProvisionTime(0)), nil) // Zero provision time makes the scale-up expire immediately.
 	// Simulate an error when trying to decrease target size
 	mockedNodeGroup.On("DecreaseTargetSize", -4).Return(fmt.Errorf("cloud provider error"))
 	provider.InsertNodeGroup(mockedNodeGroup)
@@ -2276,7 +2290,7 @@ func TestExpiredScaleUpRevertsPartialIncrease(t *testing.T) {
 	node2 := BuildTestNode("ng1_2", 1000, 1000)
 	SetNodeReadyState(node2, true, now.Add(-2*time.Minute))
 	mockedNodeGroup.On("TemplateNodeInfo").Return(framework.NewTestNodeInfo(node), nil)
-	mockedNodeGroup.On("GetOptions", mock.Anything).Return(&config.NodeGroupAutoscalingOptions{}, nil)
+	mockedNodeGroup.On("GetOptions", mock.Anything).Return(new(nodeGroupOptionsWithProvisionTime(0)), nil) // Zero provision time makes the scale-up expire immediately.
 	mockedNodeGroup.On("DecreaseTargetSize", -4).Return(nil)
 	provider.InsertNodeGroup(mockedNodeGroup)
 
@@ -2347,7 +2361,7 @@ func withMetrics(m *mockMetrics, cloudProvider cloudprovider.CloudProvider) Opti
 
 // newTestClusterStateRegistry creates new ClusterStateRegistry object and registers mock metrics observers.
 func newTestClusterStateRegistry(cloudProvider cloudprovider.CloudProvider, logRecorder *utils.LogEventRecorder, opts ...Option) *ClusterStateRegistry {
-	nodeGroupConfigProcessor := nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 2 * time.Minute})
+	nodeGroupConfigProcessor := nodegroupconfig.NewDefaultNodeGroupConfigProcessor(nodeGroupOptionsWithProvisionTime(2 * time.Minute))
 	return NewNotifiedClusterStateRegistry(cloudProvider, logRecorder, newBackoff(), nodeGroupConfigProcessor, &emptyTemplateNodeInfoRegistry{}, opts...)
 }
 
@@ -2357,7 +2371,7 @@ func failingTargetSizeNodeGroup(id string, targetSizeErr error) *mockprovider.No
 	ng.On("TargetSize", mock.Anything).Return(0, targetSizeErr)
 	ng.On("Nodes", mock.Anything).Return([]cloudprovider.Instance{}, nil)
 	ng.On("Autoprovisioned").Return(false)
-	ng.On("GetOptions", mock.Anything).Return(&config.NodeGroupAutoscalingOptions{}, nil)
+	ng.On("GetOptions", mock.Anything).Return(new(config.DefaultNodeGroupAutoscalingOptions()), nil)
 	return ng
 }
 

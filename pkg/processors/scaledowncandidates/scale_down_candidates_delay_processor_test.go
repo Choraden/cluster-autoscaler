@@ -50,12 +50,12 @@ func TestGetScaleDownCandidates(t *testing.T) {
 	}
 
 	autoscalingCtx := ca_context.AutoscalingContext{
-		AutoscalingOptions: config.AutoscalingOptions{
-			ScaleDownDelayAfterAdd:     time.Minute * 10,
-			ScaleDownDelayAfterDelete:  time.Minute * 10,
-			ScaleDownDelayAfterFailure: time.Minute * 10,
-			ScaleDownDelayTypeLocal:    true,
-		},
+		AutoscalingOptions: config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+			// ScaleDownDelayAfterAdd is already 10m by default.
+			o.ScaleDownDelayAfterDelete = time.Minute * 10
+			o.ScaleDownDelayAfterFailure = time.Minute * 10
+			o.ScaleDownDelayTypeLocal = true
+		}),
 	}
 
 	testCases := map[string]struct {

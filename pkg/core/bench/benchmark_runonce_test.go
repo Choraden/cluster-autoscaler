@@ -267,28 +267,34 @@ func (n *noOpRecorder) AnnotatedEventf(_ apimachineryruntime.Object, _ map[strin
 
 // defaultCAOptions returns the standard autoscaling configuration used as a baseline for benchmarks.
 func defaultCAOptions() config.AutoscalingOptions {
-	return config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         1 * time.Minute,
-			ScaleDownUnreadyTime:          1 * time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Minute,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		ExpanderNames:                  expander.LeastWasteExpanderName,
-		MaxBinpackingTime:              60 * time.Second,
-		MaxNodeGroupBinpackingDuration: 60 * time.Second,
-		MaxCoresTotal:                  maxCores,
-		MaxMemoryTotal:                 maxMem,
-		MaxNodesTotal:                  maxNGSize,
+	return config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = 1 * time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = 1 * time.Minute
+		o.NodeGroupDefaults.ScaleDownUtilizationThreshold = 0.5
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Minute
+		o.EstimatorName = estimator.BinpackingEstimatorName
+		o.ExpanderNames = expander.LeastWasteExpanderName
+		o.MaxBinpackingTime = 60 * time.Second
+		o.MaxNodeGroupBinpackingDuration = 60 * time.Second
+		o.MaxCoresTotal = maxCores
+		o.MaxMemoryTotal = maxMem
+		o.MaxNodesTotal = maxNGSize
 		// In a homogeneous benchmark environment, any node is a valid fit.
 		// Higher parallelism causes a race condition where multiple workers perform
 		// redundant Filter checks before the first success can trigger cancellation.
 		// This introduces lock contention on CycleState and massive variance (±20%)
 		// depending on Go scheduler non-determinism. We set it to 1 to ensure
 		// deterministic, sequential evaluation and stable profiling results.
-		PredicateParallelism: 1,
-	}
+		o.PredicateParallelism = 1
+		// Keep the measured code paths stable: individual scenarios explicitly opt
+		// into scale-down and DRA, and the baseline does not exercise CSI-aware
+		// scheduling, status ConfigMap writes, or post-taint deletion delays.
+		o.ScaleDownEnabled = false
+		o.DynamicResourceAllocationEnabled = false
+		o.CSINodeAwareSchedulingEnabled = false
+		o.WriteStatusConfigMap = false
+		o.NodeDeleteDelayAfterTaint = 0
+	})
 }
 
 // fastScaleUpNodeGroup does not simulate a real scale up by creating new Node objects.

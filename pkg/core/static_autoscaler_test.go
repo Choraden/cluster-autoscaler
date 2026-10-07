@@ -280,6 +280,26 @@ func setupCloudProvider(config *autoscalerSetupConfig) (*testprovider.TestCloudP
 	return provider, nil
 }
 
+// testAutoscalingOptions returns canonical default autoscaling options adjusted for the
+// static autoscaler test harness, followed by the given modifiers applied in order.
+// The harness doesn't set up a CSI provider, so CSI-aware scheduling is disabled, and it
+// doesn't fully wire the cluster state needed for status reporting, so writing the status
+// ConfigMap is disabled unless a test opts in. Tests typically start the autoscaler with
+// lastScaleUpTime/lastScaleDownFailTime set to now, so scale-down cooldowns are disabled
+// unless a test sets them explicitly.
+func testAutoscalingOptions(modifiers ...config.AutoscalingOptionModifier) config.AutoscalingOptions {
+	opts := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.CSINodeAwareSchedulingEnabled = false
+		o.WriteStatusConfigMap = false
+		o.ScaleDownDelayAfterAdd = 0
+		o.ScaleDownDelayAfterFailure = 0
+	})
+	for _, modify := range modifiers {
+		modify(&opts)
+	}
+	return opts
+}
+
 func applySaneDefaultOpts(autoscalingOptions *config.AutoscalingOptions) {
 	autoscalingOptions.MaxScaleDownParallelism = 10
 	autoscalingOptions.MaxDrainParallelism = 1
@@ -402,21 +422,16 @@ func TestStaticAutoscalerRunOnce(t *testing.T) {
 	assert.NotNil(t, provider)
 
 	// Create context with mocked lister registry.
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         time.Minute,
-			ScaleDownUnreadyTime:          time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		EnforceNodeGroupMinSize:        true,
-		ScaleDownEnabled:               true,
-		MaxNodesTotal:                  1,
-		MaxCoresTotal:                  10,
-		MaxMemoryTotal:                 100000,
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.EnforceNodeGroupMinSize = true
+		o.MaxNodesTotal = 1
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 	processors, TemplateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -659,25 +674,19 @@ func TestStaticAutoscalerRunOnceWithScaleDownDelayPerNG(t *testing.T) {
 			daemonSetListerMock := &daemonSetListerMock{}
 
 			// Create context with mocked lister registry.
-			options := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime:         config.DefaultScaleDownUnneededTime,
-					ScaleDownUnreadyTime:          time.Minute,
-					ScaleDownUtilizationThreshold: 0.5,
-					MaxNodeProvisionTime:          10 * time.Second,
-				},
-				EstimatorName:                  estimator.BinpackingEstimatorName,
-				EnforceNodeGroupMinSize:        true,
-				ScaleDownEnabled:               true,
-				MaxNodesTotal:                  1,
-				MaxCoresTotal:                  10,
-				MaxMemoryTotal:                 100000,
-				ScaleDownDelayTypeLocal:        true,
-				ScaleDownDelayAfterAdd:         5 * time.Minute,
-				ScaleDownDelayAfterDelete:      5 * time.Minute,
-				ScaleDownDelayAfterFailure:     5 * time.Minute,
-				MaxNodeGroupBinpackingDuration: 1 * time.Second,
-			}
+			options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+				o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+				o.EnforceNodeGroupMinSize = true
+				o.MaxNodesTotal = 1
+				o.MaxCoresTotal = 10
+				o.MaxMemoryTotal = 100000
+				o.ScaleDownDelayTypeLocal = true
+				o.ScaleDownDelayAfterAdd = 5 * time.Minute
+				o.ScaleDownDelayAfterDelete = 5 * time.Minute
+				o.ScaleDownDelayAfterFailure = 5 * time.Minute
+				o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+			})
 			processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 			processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -814,20 +823,15 @@ func TestStaticAutoscalerRunOnceWithAutoprovisionedEnabled(t *testing.T) {
 	assert.NotNil(t, provider)
 
 	// Create context with mocked lister registry.
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         time.Minute,
-			ScaleDownUnreadyTime:          time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		ScaleDownEnabled:               true,
-		MaxNodesTotal:                  100,
-		MaxCoresTotal:                  100,
-		MaxMemoryTotal:                 100000,
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 100
+		o.MaxCoresTotal = 100
+		o.MaxMemoryTotal = 100000
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -961,21 +965,16 @@ func TestStaticAutoscalerRunOnceWithALongUnregisteredNode(t *testing.T) {
 			assert.NotNil(t, provider)
 
 			// Create context with mocked lister registry.
-			options := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime:         time.Minute,
-					ScaleDownUnreadyTime:          time.Minute,
-					ScaleDownUtilizationThreshold: 0.5,
-					MaxNodeProvisionTime:          10 * time.Second,
-				},
-				EstimatorName:                    estimator.BinpackingEstimatorName,
-				ScaleDownEnabled:                 true,
-				MaxNodesTotal:                    10,
-				MaxCoresTotal:                    10,
-				MaxMemoryTotal:                   100000,
-				ForceDeleteLongUnregisteredNodes: forceDeleteLongUnregisteredNodes,
-				MaxNodeGroupBinpackingDuration:   1 * time.Second,
-			}
+			options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+				o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+				o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+				o.MaxNodesTotal = 10
+				o.MaxCoresTotal = 10
+				o.MaxMemoryTotal = 100000
+				o.ForceDeleteLongUnregisteredNodes = forceDeleteLongUnregisteredNodes
+				o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+			})
 			processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 			processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -1126,22 +1125,17 @@ func TestStaticAutoscalerRunOncePodsWithPriorities(t *testing.T) {
 	assert.NotNil(t, ng2)
 
 	// Create context with mocked lister registry.
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			ScaleDownUnreadyTime:          time.Minute,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		ScaleDownEnabled:               true,
-		MaxNodesTotal:                  10,
-		MaxCoresTotal:                  10,
-		MaxMemoryTotal:                 100000,
-		ExpendablePodsPriorityCutoff:   10,
-		NodeDeletionBatcherInterval:    0 * time.Second,
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+		o.ExpendablePodsPriorityCutoff = 10
+		o.NodeDeletionBatcherInterval = 0 * time.Second
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -1261,18 +1255,14 @@ func TestStaticAutoscalerRunOnceWithFilteringOnBinPackingEstimator(t *testing.T)
 	assert.NotNil(t, provider)
 
 	// Create context with mocked lister registry.
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		MaxNodesTotal:                  10,
-		MaxCoresTotal:                  10,
-		MaxMemoryTotal:                 100000,
-		ExpendablePodsPriorityCutoff:   10,
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+		o.ExpendablePodsPriorityCutoff = 10
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -1358,18 +1348,14 @@ func TestStaticAutoscalerRunOnceWithFilteringOnUpcomingNodesEnabledNoScaleUp(t *
 	assert.NotNil(t, provider)
 
 	// Create context with mocked lister registry.
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		MaxNodesTotal:                  10,
-		MaxCoresTotal:                  10,
-		MaxMemoryTotal:                 100000,
-		ExpendablePodsPriorityCutoff:   10,
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+		o.ExpendablePodsPriorityCutoff = 10
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -1482,24 +1468,19 @@ func TestStaticAutoscalerRunOnceWithUnselectedNodeGroups(t *testing.T) {
 func TestStaticAutoscalerRunOnceWithBypassedSchedulers(t *testing.T) {
 	bypassedScheduler := "bypassed-scheduler"
 	nonBypassedScheduler := "non-bypassed-scheduler"
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         time.Minute,
-			ScaleDownUnreadyTime:          time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:    estimator.BinpackingEstimatorName,
-		ScaleDownEnabled: true,
-		MaxNodesTotal:    10,
-		MaxCoresTotal:    10,
-		MaxMemoryTotal:   100000,
-		BypassedSchedulers: scheduler.SchedulersMap([]string{
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+		o.BypassedSchedulers = scheduler.SchedulersMap([]string{
 			apiv1.DefaultSchedulerName,
 			bypassedScheduler,
-		}),
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+		})
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 	now := time.Now()
 
 	n1 := BuildTestNode("n1", 1000, 1000)
@@ -1692,22 +1673,17 @@ func TestStaticAutoscalerRunOnceWithExistingDeletionCandidateNodes(t *testing.T)
 			assert.NotNil(t, ng1)
 			assert.NotNil(t, provider)
 
-			options := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime:         time.Minute,
-					ScaleDownUnreadyTime:          time.Minute,
-					ScaleDownUtilizationThreshold: 0.5,
-					MaxNodeProvisionTime:          10 * time.Second,
-				},
-				EstimatorName:                  estimator.BinpackingEstimatorName,
-				EnforceNodeGroupMinSize:        true,
-				ScaleDownEnabled:               true,
-				MaxNodesTotal:                  100,
-				MaxCoresTotal:                  100,
-				MaxMemoryTotal:                 100000,
-				NodeDeletionCandidateTTL:       tc.deletionCandidateStalenessTTL,
-				MaxNodeGroupBinpackingDuration: 1 * time.Second,
-			}
+			options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+				o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+				o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+				o.EnforceNodeGroupMinSize = true
+				o.MaxNodesTotal = 100
+				o.MaxCoresTotal = 100
+				o.MaxMemoryTotal = 100000
+				o.NodeDeletionCandidateTTL = tc.deletionCandidateStalenessTTL
+				o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+			})
 
 			processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
@@ -1815,22 +1791,17 @@ func TestStaticAutoscalerInstanceCreationErrors(t *testing.T) {
 			provider := &mockprovider.CloudProvider{}
 
 			// Create context with mocked lister registry.
-			options := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUnneededTime:         time.Minute,
-					ScaleDownUnreadyTime:          time.Minute,
-					ScaleDownUtilizationThreshold: 0.5,
-					MaxNodeProvisionTime:          10 * time.Second,
-				},
-				EstimatorName:                  estimator.BinpackingEstimatorName,
-				ScaleDownEnabled:               true,
-				MaxNodesTotal:                  10,
-				MaxCoresTotal:                  10,
-				MaxMemoryTotal:                 100000,
-				ExpendablePodsPriorityCutoff:   10,
-				ForceDeleteFailedNodes:         tc.forceDeleteEnabled,
-				MaxNodeGroupBinpackingDuration: 1 * time.Second,
-			}
+			options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+				o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+				o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+				o.MaxNodesTotal = 10
+				o.MaxCoresTotal = 10
+				o.MaxMemoryTotal = 100000
+				o.ExpendablePodsPriorityCutoff = 10
+				o.ForceDeleteFailedNodes = tc.forceDeleteEnabled
+				o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+			})
 			processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 			var deleteMethod string
 			if tc.forceDeleteEnabled {
@@ -2190,20 +2161,15 @@ func setupTestStaticAutoscalerInstanceCreationErrorsForZeroOrMaxScaling(t *testi
 	provider := &mockprovider.CloudProvider{}
 
 	// Create context with mocked lister registry.
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         time.Minute,
-			ScaleDownUnreadyTime:          time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                estimator.BinpackingEstimatorName,
-		ScaleDownEnabled:             true,
-		MaxNodesTotal:                10,
-		MaxCoresTotal:                10,
-		MaxMemoryTotal:               100000,
-		ExpendablePodsPriorityCutoff: 10,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+		o.ExpendablePodsPriorityCutoff = 10
+	})
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 	_, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -2231,11 +2197,10 @@ func setupTestStaticAutoscalerInstanceCreationErrorsForZeroOrMaxScaling(t *testi
 	nodeGroupAtomic.On("TargetSize").Return(len(nodes), nil)
 	nodeGroupAtomic.On("Id").Return("D")
 	nodeGroupAtomic.On("DeleteNodes", mock.Anything).Return(nil)
-	nodeGroupAtomic.On("GetOptions", options.NodeGroupDefaults).Return(
-		&config.NodeGroupAutoscalingOptions{
-			ZeroOrMaxNodeScaling:       true,
-			AllowNonAtomicScaleUpToMax: allowNonAtomicScaleUpToMax,
-		}, nil)
+	atomicOpts := config.DefaultNodeGroupAutoscalingOptions()
+	atomicOpts.ZeroOrMaxNodeScaling = true
+	atomicOpts.AllowNonAtomicScaleUpToMax = allowNonAtomicScaleUpToMax
+	nodeGroupAtomic.On("GetOptions", options.NodeGroupDefaults).Return(&atomicOpts, nil)
 	nodeGroupAtomic.On("Nodes").Return(nodes, nil).Times(2)
 
 	provider = &mockprovider.CloudProvider{}
@@ -2489,7 +2454,7 @@ func TestStaticAutoscalerUpcomingScaleDownCandidates(t *testing.T) {
 
 	// Create context with minimal autoscalingOptions that guarantee we reach the tested logic.
 	// We're only testing the input to UpdateClusterState which should be called whenever scale-down is enabled, other autoscalingOptions shouldn't matter.
-	autoscalingOptions := config.AutoscalingOptions{ScaleDownEnabled: true}
+	autoscalingOptions := testAutoscalingOptions()
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(autoscalingOptions)
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(autoscalingOptions, &fake.Clientset{}, listerRegistry, provider, processorCallbacks, nil, templateNodeInfoRegistry)
@@ -2497,7 +2462,7 @@ func TestStaticAutoscalerUpcomingScaleDownCandidates(t *testing.T) {
 
 	// Create CSR with unhealthy cluster protection effectively disabled, to guarantee we reach the tested logic.
 	csrConfig := clusterstate.ClusterStateRegistryConfig{OkTotalUnreadyCount: nodeGroupCount * unreadyNodesCount}
-	csr := clusterstate.NewClusterStateRegistry(provider, autoscalingCtx.LogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.NodeGroupAutoscalingOptions{MaxNodeProvisionTime: 15 * time.Minute, MaxNodeStartupTime: 15 * time.Minute}), templateNodeInfoRegistry, clusterstate.WithConfig(csrConfig))
+	csr := clusterstate.NewClusterStateRegistry(provider, autoscalingCtx.LogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(config.DefaultNodeGroupAutoscalingOptions()), templateNodeInfoRegistry, clusterstate.WithConfig(csrConfig))
 	for ngNum := 0; ngNum < nodeGroupCount; ngNum++ {
 		csr.RegisterScaleUp(context.Background(), provider.GetNodeGroup(fmt.Sprintf("ng-%d", ngNum)), unreadyNodesCount, startTime)
 	}
@@ -2587,11 +2552,9 @@ func TestRemoveFixNodeTargetSize(t *testing.T) {
 	fakeLogRecorder, _ := clusterstate_utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 
 	autoscalingCtx := &ca_context.AutoscalingContext{
-		AutoscalingOptions: config.AutoscalingOptions{
-			NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-				MaxNodeProvisionTime: 45 * time.Minute,
-			},
-		},
+		AutoscalingOptions: testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+			o.NodeGroupDefaults.MaxNodeProvisionTime = 45 * time.Minute
+		}),
 		CloudProvider: provider,
 	}
 
@@ -2636,11 +2599,9 @@ func TestRemoveOldUnregisteredNodes(t *testing.T) {
 	fakeLogRecorder, _ := clusterstate_utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 
 	autoscalingCtx := &ca_context.AutoscalingContext{
-		AutoscalingOptions: config.AutoscalingOptions{
-			NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-				MaxNodeProvisionTime: 45 * time.Minute,
-			},
-		},
+		AutoscalingOptions: testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+			o.NodeGroupDefaults.MaxNodeProvisionTime = 45 * time.Minute
+		}),
 		CloudProvider: provider,
 	}
 	clusterState := clusterstate.NewClusterStateRegistry(provider, fakeLogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(autoscalingCtx.AutoscalingOptions.NodeGroupDefaults), nil, clusterstate.WithConfig(clusterstate.ClusterStateRegistryConfig{
@@ -2678,11 +2639,11 @@ func setupTestRemoveOldUnregisteredNodesAtomic(t *testing.T, now time.Time, allo
 		deletedNodes <- fmt.Sprintf("%s/%s", nodegroup, node)
 		return nil
 	}).Build()
-	provider.AddNodeGroupWithCustomOptions("atomic-ng", 0, 10, 10, &config.NodeGroupAutoscalingOptions{
-		MaxNodeProvisionTime:       45 * time.Minute,
-		ZeroOrMaxNodeScaling:       true,
-		AllowNonAtomicScaleUpToMax: allowNonAtomicScaleUpToMax,
-	})
+	atomicOpts := config.DefaultNodeGroupAutoscalingOptions()
+	atomicOpts.MaxNodeProvisionTime = 45 * time.Minute
+	atomicOpts.ZeroOrMaxNodeScaling = true
+	atomicOpts.AllowNonAtomicScaleUpToMax = allowNonAtomicScaleUpToMax
+	provider.AddNodeGroupWithCustomOptions("atomic-ng", 0, 10, 10, &atomicOpts)
 	regNode := BuildTestNode("atomic-ng-0", 1000, 1000)
 	regNode.Spec.ProviderID = "atomic-ng-0"
 	provider.AddNode("atomic-ng", regNode)
@@ -2696,11 +2657,9 @@ func setupTestRemoveOldUnregisteredNodesAtomic(t *testing.T, now time.Time, allo
 	fakeLogRecorder, _ := clusterstate_utils.NewStatusMapRecorder(fakeClient, "kube-system", kube_record.NewFakeRecorder(5), false, "my-cool-configmap")
 
 	autoscalingCtx := &ca_context.AutoscalingContext{
-		AutoscalingOptions: config.AutoscalingOptions{
-			NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-				MaxNodeProvisionTime: time.Hour,
-			},
-		},
+		AutoscalingOptions: testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+			o.NodeGroupDefaults.MaxNodeProvisionTime = time.Hour
+		}),
 		CloudProvider: provider,
 	}
 	clusterState := clusterstate.NewClusterStateRegistry(provider, fakeLogRecorder, NewBackoff(), nodegroupconfig.NewDefaultNodeGroupConfigProcessor(autoscalingCtx.AutoscalingOptions.NodeGroupDefaults), nil, clusterstate.WithConfig(clusterstate.ClusterStateRegistryConfig{
@@ -2900,9 +2859,9 @@ func TestFilterOutYoungPods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			autoscalingCtx := ca_context.AutoscalingContext{
-				AutoscalingOptions: config.AutoscalingOptions{
-					NewPodScaleUpDelay: tt.newPodScaleUpDelay,
-				},
+				AutoscalingOptions: testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+					o.NewPodScaleUpDelay = tt.newPodScaleUpDelay
+				}),
 			}
 			autoscaler := &StaticAutoscaler{
 				AutoscalingContext: &autoscalingCtx,
@@ -2925,19 +2884,16 @@ func TestFilterOutYoungPods(t *testing.T) {
 }
 
 func TestStaticAutoscalerRunOnceInvokesScaleDownStatusProcessor(t *testing.T) {
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         -1 * time.Nanosecond, // enforce immediate scaledown/drain for ready
-			ScaleDownUnreadyTime:          -1 * time.Nanosecond, // enforce immediate scaledown/drain for unready
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:    estimator.BinpackingEstimatorName,
-		ScaleDownEnabled: true,
-		MaxNodesTotal:    10,
-		MaxCoresTotal:    10,
-		MaxMemoryTotal:   100000,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = -1 * time.Nanosecond
+		// enforce immediate scaledown/drain for ready
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = -1 * time.Nanosecond
+		// enforce immediate scaledown/drain for unready
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+	})
 	now := time.Now()
 	n1 := BuildTestNode("n1", 1000, 1000)
 	SetNodeReadyState(n1, true, now)
@@ -3271,21 +3227,15 @@ func TestCleaningSoftTaintsInScaleDown(t *testing.T) {
 }
 
 func buildStaticAutoscaler(t *testing.T, provider cloudprovider.CloudProvider, allNodes []*apiv1.Node, readyNodes []*apiv1.Node, fakeClient *fake.Clientset) *StaticAutoscaler {
-	autoscalingOptions := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         time.Minute,
-			ScaleDownUnreadyTime:          time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		MaxScaleDownParallelism:    10,
-		MaxDrainParallelism:        1,
-		ScaleDownEnabled:           true,
-		MaxBulkSoftTaintCount:      20,
-		MaxBulkSoftTaintTime:       5 * time.Second,
-		NodeDeleteDelayAfterTaint:  5 * time.Minute,
-		ScaleDownSimulationTimeout: 10 * time.Second,
-	}
+	autoscalingOptions := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxBulkSoftTaintCount = 20
+		o.MaxBulkSoftTaintTime = 5 * time.Second
+		o.NodeDeleteDelayAfterTaint = 5 * time.Minute
+		o.ScaleDownSimulationTimeout = 10 * time.Second
+	})
 
 	allNodeLister := kubernetes.NewTestNodeLister(allNodes)
 	readyNodeLister := kubernetes.NewTestNodeLister(readyNodes)
@@ -3455,21 +3405,16 @@ func TestStaticAutoscalerWithNodeDeclaredFeatures(t *testing.T) {
 	anotherPodRequiresFeatureA := BuildTestPod("podA2", 900, 900, MarkUnschedulable())
 	anotherPodRequiresFeatureA.Spec.Containers[0].Env = []apiv1.EnvVar{{Name: "REQUIRE_FEATURE", Value: "FeatureA"}}
 
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUnneededTime:         time.Minute,
-			ScaleDownUnreadyTime:          time.Minute,
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		EnforceNodeGroupMinSize:        true,
-		ScaleDownEnabled:               true,
-		MaxNodesTotal:                  10,
-		MaxCoresTotal:                  10,
-		MaxMemoryTotal:                 1000,
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+		o.NodeGroupDefaults.ScaleDownUnreadyTime = time.Minute
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.EnforceNodeGroupMinSize = true
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 1000
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 
 	type testCase struct {
 		name             string
@@ -3636,7 +3581,7 @@ func TestStaticAutoscalerRunOnceClearsRegistry(t *testing.T) {
 	provider.AddNodeGroup("ng1", 1, 10, 1)
 	provider.AddNode("ng1", n1)
 
-	options := config.AutoscalingOptions{}
+	options := testAutoscalingOptions()
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
 	autoscalingCtx, _ := NewScaleTestAutoscalingContext(options, &fake.Clientset{}, nil, provider, processorCallbacks, nil, templateNodeInfoRegistry)
@@ -3726,17 +3671,13 @@ func TestStaticAutoscalerRunOnceWithNominatedNodeName(t *testing.T) {
 	assert.NotNil(t, provider)
 
 	// Create context with mocked lister registry.
-	options := config.AutoscalingOptions{
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUtilizationThreshold: 0.5,
-			MaxNodeProvisionTime:          10 * time.Second,
-		},
-		EstimatorName:                  estimator.BinpackingEstimatorName,
-		MaxNodesTotal:                  10,
-		MaxCoresTotal:                  10,
-		MaxMemoryTotal:                 100000,
-		MaxNodeGroupBinpackingDuration: 1 * time.Second,
-	}
+	options := testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.MaxNodeProvisionTime = 10 * time.Second
+		o.MaxNodesTotal = 10
+		o.MaxCoresTotal = 10
+		o.MaxMemoryTotal = 100000
+		o.MaxNodeGroupBinpackingDuration = 1 * time.Second
+	})
 	processorCallbacks := newStaticAutoscalerProcessorCallbacks()
 
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
@@ -3869,16 +3810,11 @@ func TestStaticAutoscalerScaleDownCustomQuota(t *testing.T) {
 			onScaleDown:               onScaleDownMock,
 		},
 		quotaProvider: qp,
-		autoscalingOptions: config.AutoscalingOptions{
-			ScaleDownEnabled: true,
-			NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-				ScaleDownUnneededTime:         0 * time.Second,
-				ScaleDownUnreadyTime:          0 * time.Second,
-				ScaleDownUtilizationThreshold: 0.5,
-			},
-			ScaleDownSimulationTimeout: 10 * time.Second,
-			MaxScaleDownParallelism:    10,
-		},
+		autoscalingOptions: testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+			o.NodeGroupDefaults.ScaleDownUnneededTime = 0 * time.Second
+			o.NodeGroupDefaults.ScaleDownUnreadyTime = 0 * time.Second
+			o.ScaleDownSimulationTimeout = 10 * time.Second
+		}),
 	}
 
 	autoscaler, err := setupAutoscaler(setupConfig)
@@ -3952,15 +3888,12 @@ func TestShouldScaleDown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mocks := newCommonMocks()
 			setupConfig := &autoscalerSetupConfig{
-				autoscalingOptions: config.AutoscalingOptions{
-					ScaleDownEnabled:           tc.scaleDownEnabled,
-					GracefulDegradationEnabled: tc.gracefulDegradationEnabled,
-					NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-						ScaleDownUnneededTime:         0 * time.Second,
-						ScaleDownUtilizationThreshold: 0.5,
-					},
-					MaxNodesTotal: 10,
-				},
+				autoscalingOptions: testAutoscalingOptions(func(o *config.AutoscalingOptions) {
+					o.ScaleDownEnabled = tc.scaleDownEnabled
+					o.GracefulDegradationEnabled = tc.gracefulDegradationEnabled
+					o.NodeGroupDefaults.ScaleDownUnneededTime = 0 * time.Second
+					o.MaxNodesTotal = 10
+				}),
 				nodeGroups: []*nodeGroup{{
 					name:     "ng1",
 					min:      0,

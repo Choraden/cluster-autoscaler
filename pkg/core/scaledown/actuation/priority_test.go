@@ -70,10 +70,10 @@ func TestPriorityEvictor(t *testing.T) {
 		return true, nil, nil
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec: 20,
-		MaxPodEvictionTime:        5 * time.Second,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 20
+		o.MaxPodEvictionTime = 5 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 

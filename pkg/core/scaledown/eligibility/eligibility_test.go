@@ -39,50 +39,33 @@ import (
 	. "sigs.k8s.io/cluster-autoscaler/pkg/utils/test"
 )
 
-type optionsPatch func(options *config.AutoscalingOptions)
-
-func defaultOptions() *config.AutoscalingOptions {
-	return &config.AutoscalingOptions{
-		DynamicResourceAllocationEnabled: false,
-		UnremovableNodeRecheckTimeout:    5 * time.Minute,
-		ScaleDownUnreadyEnabled:          true,
-		NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-			ScaleDownUtilizationThreshold:    config.DefaultScaleDownUtilizationThreshold,
-			ScaleDownGpuUtilizationThreshold: config.DefaultScaleDownGpuUtilizationThreshold,
-			ScaleDownUnneededTime:            config.DefaultScaleDownUnneededTime,
-			ScaleDownUnreadyTime:             config.DefaultScaleDownUnreadyTime,
-			IgnoreDaemonSetsUtilization:      false,
-		},
-	}
+// defaultOptions returns canonical default autoscaling options with DRA disabled,
+// followed by the given modifiers applied in order.
+func defaultOptions(modifiers ...config.AutoscalingOptionModifier) *config.AutoscalingOptions {
+	mods := append([]config.AutoscalingOptionModifier{withDRAEnabled(false)}, modifiers...)
+	opts := config.DefaultAutoscalingOptions(mods...)
+	return &opts
 }
 
-func applyOptionsPatches(opts *config.AutoscalingOptions, patches ...optionsPatch) {
-	for _, patch := range patches {
-		if patch != nil {
-			patch(opts)
-		}
-	}
-}
-
-func withIgnoreDaemonSetsUtilization(v bool) optionsPatch {
+func withIgnoreDaemonSetsUtilization(v bool) config.AutoscalingOptionModifier {
 	return func(o *config.AutoscalingOptions) {
 		o.NodeGroupDefaults.IgnoreDaemonSetsUtilization = v
 	}
 }
 
-func withScaleDownUnreadyEnabled(v bool) optionsPatch {
+func withScaleDownUnreadyEnabled(v bool) config.AutoscalingOptionModifier {
 	return func(o *config.AutoscalingOptions) {
 		o.ScaleDownUnreadyEnabled = v
 	}
 }
 
-func withScaleDownUtilizationThreshold(v float64) optionsPatch {
+func withScaleDownUtilizationThreshold(v float64) config.AutoscalingOptionModifier {
 	return func(o *config.AutoscalingOptions) {
 		o.NodeGroupDefaults.ScaleDownUtilizationThreshold = v
 	}
 }
 
-func withDRAEnabled(v bool) optionsPatch {
+func withDRAEnabled(v bool) config.AutoscalingOptionModifier {
 	return func(o *config.AutoscalingOptions) {
 		o.DynamicResourceAllocationEnabled = v
 	}
@@ -97,13 +80,13 @@ type testCase struct {
 	wantUnneeded    []string
 	wantUnremovable []*simulator.UnremovableNode
 
-	optsPatches []optionsPatch
+	optsPatches []config.AutoscalingOptionModifier
 }
 
 // suite is a group of testCases that share the same default option patches.
 type suite struct {
 	name     string
-	patches  []optionsPatch
+	patches  []config.AutoscalingOptionModifier
 	testCase []testCase
 }
 
@@ -129,7 +112,7 @@ func applySuite(s suite) []testCase {
 		if s.name != "" {
 			ntc.desc = ntc.desc + " " + s.name
 		}
-		ntc.optsPatches = append(append([]optionsPatch{}, s.patches...), tc.optsPatches...)
+		ntc.optsPatches = append(append([]config.AutoscalingOptionModifier{}, s.patches...), tc.optsPatches...)
 		out = append(out, ntc)
 	}
 	return out
@@ -226,7 +209,7 @@ func getTestCases(now time.Time) []testCase {
 			nodes:           []*apiv1.Node{unreadyNode},
 			wantUnneeded:    []string{},
 			wantUnremovable: []*simulator.UnremovableNode{{Node: unreadyNode, Reason: simulator.ScaleDownUnreadyDisabled}},
-			optsPatches:     []optionsPatch{withScaleDownUnreadyEnabled(false)},
+			optsPatches:     []config.AutoscalingOptionModifier{withScaleDownUnreadyEnabled(false)},
 		},
 		{
 			desc:            "Node is not filtered out because of DRA issues if DRA is disabled",
@@ -243,7 +226,7 @@ func getTestCases(now time.Time) []testCase {
 			draSnapshot:     drasnapshot.NewSnapshot(nil, map[string][]*resourceapi.ResourceSlice{"regular": {regularNodeIncompleteResourceSlice}}, nil, nil),
 			wantUnneeded:    []string{},
 			wantUnremovable: []*simulator.UnremovableNode{{Node: regularNode, Reason: simulator.UnexpectedError}},
-			optsPatches:     []optionsPatch{withDRAEnabled(true)},
+			optsPatches:     []config.AutoscalingOptionModifier{withDRAEnabled(true)},
 		},
 	}
 
@@ -262,7 +245,7 @@ func getTestCases(now time.Time) []testCase {
 			pods:            []*apiv1.Pod{smallPod, dsPod},
 			wantUnneeded:    []string{},
 			wantUnremovable: []*simulator.UnremovableNode{{Node: regularNode, Reason: simulator.NotUnderutilized}},
-			optsPatches:     []optionsPatch{withIgnoreDaemonSetsUtilization(false)},
+			optsPatches:     []config.AutoscalingOptionModifier{withIgnoreDaemonSetsUtilization(false)},
 		},
 		{
 			desc:            "only daemonsets pods on this node (threshold=0)",
@@ -270,7 +253,7 @@ func getTestCases(now time.Time) []testCase {
 			pods:            []*apiv1.Pod{dsPod},
 			wantUnneeded:    []string{"regular"},
 			wantUnremovable: []*simulator.UnremovableNode{},
-			optsPatches:     []optionsPatch{withScaleDownUtilizationThreshold(0)},
+			optsPatches:     []config.AutoscalingOptionModifier{withScaleDownUtilizationThreshold(0)},
 		},
 	}
 
@@ -282,7 +265,7 @@ func getTestCases(now time.Time) []testCase {
 		},
 		{
 			name:     "[ignore-daemonsets=true]",
-			patches:  []optionsPatch{withIgnoreDaemonSetsUtilization(true)},
+			patches:  []config.AutoscalingOptionModifier{withIgnoreDaemonSetsUtilization(true)},
 			testCase: append(baseCases, daemonsetSpecialCases...),
 		},
 	}
@@ -302,8 +285,7 @@ func TestFilterOutUnremovable(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			t.Parallel()
 
-			options := defaultOptions()
-			applyOptionsPatches(options, tc.optsPatches...)
+			options := defaultOptions(tc.optsPatches...)
 			s := nodegroupconfig.NewDefaultNodeGroupConfigProcessor(options.NodeGroupDefaults)
 			c := NewChecker(s)
 			provider := testprovider.NewTestCloudProviderBuilder().Build()

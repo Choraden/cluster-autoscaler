@@ -96,7 +96,9 @@ func TestNodePoolAsyncInitialization(t *testing.T) {
 	}
 	listers := kube_util.NewListerRegistry(nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	upcomingNodeGroup := provider.BuildNodeGroup("upcoming-ng", 0, 100, 0, false, true, "T1", nil)
-	options := config.AutoscalingOptions{AsyncNodeGroupsEnabled: true}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.AsyncNodeGroupsEnabled = true
+	})
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
 	context, err := NewScaleTestAutoscalingContext(options, &fake.Clientset{}, listers, provider, nil, nil, templateNodeInfoRegistry)
 	assert.NoError(t, err)
@@ -185,7 +187,9 @@ func TestPrepareScaleUps(t *testing.T) {
 	}
 
 	listers := kube_util.NewListerRegistry(nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	options := config.AutoscalingOptions{AsyncNodeGroupsEnabled: true}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.AsyncNodeGroupsEnabled = true
+	})
 	processors, templateNodeInfoRegistry := processorstest.NewTestProcessors(options)
 	context, err := NewScaleTestAutoscalingContext(options, &fake.Clientset{}, listers, provider, nil, nil, templateNodeInfoRegistry)
 	assert.NoError(t, err)

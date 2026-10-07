@@ -139,10 +139,10 @@ func TestFixNodeGroupSize_ZeroOrMaxNodeScaling(t *testing.T) {
 		autoscaler, _, err := integration.DefaultAutoscalingBuilder(options, infra).Build(ctx)
 		assert.NoError(t, err)
 
-		nodeGroupOpts := &config.NodeGroupAutoscalingOptions{
-			ZeroOrMaxNodeScaling: true,
-			MaxNodeProvisionTime: 10 * time.Second,
-		}
+		ngOpts := config.DefaultNodeGroupAutoscalingOptions()
+		ngOpts.ZeroOrMaxNodeScaling = true
+		ngOpts.MaxNodeProvisionTime = 10 * time.Second
+		nodeGroupOpts := &ngOpts
 
 		templateNode := test.BuildTestNode("atomic-ng-node-0", 2000, 8*1024*1024*1024, test.IsReady(true))
 		ng := fakes.CloudProvider.AddNodeGroup(

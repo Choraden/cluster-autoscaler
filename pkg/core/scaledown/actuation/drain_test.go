@@ -95,15 +95,12 @@ func TestDaemonSetEvictionForEmptyNodes(t *testing.T) {
 		scenario := scenario
 		t.Run(scenario.name, func(t *testing.T) {
 			t.Parallel()
-			options := config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{
-					ScaleDownUtilizationThreshold: 0.5,
-					ScaleDownUnneededTime:         time.Minute,
-				},
-				MaxGracefulTerminationSec:      1,
-				DaemonSetEvictionForEmptyNodes: scenario.evictByDefault,
-				MaxPodEvictionTime:             scenario.dsEvictionTimeout,
-			}
+			options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+				o.NodeGroupDefaults.ScaleDownUnneededTime = time.Minute
+				o.MaxGracefulTerminationSec = 1
+				o.DaemonSetEvictionForEmptyNodes = scenario.evictByDefault
+				o.MaxPodEvictionTime = scenario.dsEvictionTimeout
+			})
 			deletedPods := make(chan string, len(scenario.dsPods)+2)
 			waitBetweenRetries := 10 * time.Millisecond
 
@@ -205,11 +202,10 @@ func TestDrainNodeWithPods(t *testing.T) {
 		return true, nil, nil
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec:         20,
-		MaxPodEvictionTime:                5 * time.Second,
-		DaemonSetEvictionForOccupiedNodes: true,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 20
+		o.MaxPodEvictionTime = 5 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 
@@ -270,10 +266,10 @@ func TestDrainNodeWithPodsWithRescheduled(t *testing.T) {
 		return true, nil, nil
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec: 20,
-		MaxPodEvictionTime:        5 * time.Second,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 20
+		o.MaxPodEvictionTime = 5 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 
@@ -338,11 +334,10 @@ func TestDrainNodeWithPodsWithRetries(t *testing.T) {
 		}
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec:         20,
-		MaxPodEvictionTime:                5 * time.Second,
-		DaemonSetEvictionForOccupiedNodes: true,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 20
+		o.MaxPodEvictionTime = 5 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 
@@ -414,10 +409,10 @@ func TestDrainNodeWithPodsDaemonSetEvictionFailure(t *testing.T) {
 		return true, nil, nil
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec: 20,
-		MaxPodEvictionTime:        0 * time.Second,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 20
+		o.MaxPodEvictionTime = 0 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 
@@ -476,10 +471,10 @@ func TestDrainNodeWithPodsEvictionFailure(t *testing.T) {
 		return true, nil, nil
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec: 20,
-		MaxPodEvictionTime:        0 * time.Second,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 20
+		o.MaxPodEvictionTime = 0 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 	r := evRegister{}
@@ -557,10 +552,10 @@ func TestDrainForceNodeWithPodsEvictionFailure(t *testing.T) {
 		return false, nil, fmt.Errorf("unexpected pod deletion: %s", deleteAction.GetName())
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec: 20,
-		MaxPodEvictionTime:        0 * time.Second,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 20
+		o.MaxPodEvictionTime = 0 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 	r := evRegister{}
@@ -619,10 +614,10 @@ func TestDrainWithPodsNodeDisappearanceFailure(t *testing.T) {
 		return true, nil, nil
 	})
 
-	options := config.AutoscalingOptions{
-		MaxGracefulTerminationSec: 0,
-		MaxPodEvictionTime:        0 * time.Second,
-	}
+	options := config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+		o.MaxGracefulTerminationSec = 0
+		o.MaxPodEvictionTime = 0 * time.Second
+	})
 	autoscalingCtx, err := NewScaleTestAutoscalingContext(options, fakeClient, nil, nil, nil, nil, nil)
 	assert.NoError(t, err)
 
@@ -737,9 +732,9 @@ func TestPodsToEvict(t *testing.T) {
 			}
 			autoscalingCtx := &ca_context.AutoscalingContext{
 				ClusterSnapshot: snapshot,
-				AutoscalingOptions: config.AutoscalingOptions{
-					DaemonSetEvictionForOccupiedNodes: !tc.dsEvictionDisabled,
-				},
+				AutoscalingOptions: config.DefaultAutoscalingOptions(func(o *config.AutoscalingOptions) {
+					o.DaemonSetEvictionForOccupiedNodes = !tc.dsEvictionDisabled
+				}),
 			}
 			nodeName := "test-node"
 			if tc.nodeNameOverwrite != "" {

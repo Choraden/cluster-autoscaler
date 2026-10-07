@@ -38,6 +38,12 @@ import (
 	core "k8s.io/client-go/testing"
 )
 
+// defaultAutoscalingOpts returns a pointer to canonical default autoscaling options.
+func defaultAutoscalingOpts() *config.AutoscalingOptions {
+	opts := config.DefaultAutoscalingOptions()
+	return &opts
+}
+
 func TestNodeGroups(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 	var nodesFrom string
@@ -86,7 +92,7 @@ func TestNodeGroups(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -137,7 +143,7 @@ func TestNodeGroups(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -237,7 +243,7 @@ func TestRefresh(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -306,7 +312,7 @@ func TestGetResourceLimiter(t *testing.T) {
 
 	ko := &kwokOptions{
 		kubeClient:      fakeClient,
-		autoscalingOpts: &config.AutoscalingOptions{},
+		autoscalingOpts: defaultAutoscalingOpts(),
 		discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 		resourceLimiter: cloudprovider.NewResourceLimiter(
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -380,7 +386,7 @@ func TestGetAvailableGPUTypes(t *testing.T) {
 
 	ko := &kwokOptions{
 		kubeClient:      fakeClient,
-		autoscalingOpts: &config.AutoscalingOptions{},
+		autoscalingOpts: defaultAutoscalingOpts(),
 		discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 		resourceLimiter: cloudprovider.NewResourceLimiter(
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -459,7 +465,7 @@ func TestGetNodeGpuConfig(t *testing.T) {
 
 	ko := &kwokOptions{
 		kubeClient:      fakeClient,
-		autoscalingOpts: &config.AutoscalingOptions{},
+		autoscalingOpts: defaultAutoscalingOpts(),
 		discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 		resourceLimiter: cloudprovider.NewResourceLimiter(
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -565,7 +571,7 @@ func TestGPULabel(t *testing.T) {
 
 	ko := &kwokOptions{
 		kubeClient:      fakeClient,
-		autoscalingOpts: &config.AutoscalingOptions{},
+		autoscalingOpts: defaultAutoscalingOpts(),
 		discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 		resourceLimiter: cloudprovider.NewResourceLimiter(
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -646,7 +652,7 @@ func TestNodeGroupForNode(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -711,7 +717,7 @@ func TestNodeGroupForNode(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -751,7 +757,7 @@ func TestNodeGroupForNode(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -897,7 +903,7 @@ func TestBuildKwokProvider(t *testing.T) {
 
 	ko := &kwokOptions{
 		kubeClient:      fakeClient,
-		autoscalingOpts: &config.AutoscalingOptions{},
+		autoscalingOpts: defaultAutoscalingOpts(),
 		discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 		resourceLimiter: cloudprovider.NewResourceLimiter(
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -1141,7 +1147,7 @@ func TestCleanup(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
@@ -1181,7 +1187,7 @@ func TestCleanup(t *testing.T) {
 
 		ko := &kwokOptions{
 			kubeClient:      fakeClient,
-			autoscalingOpts: &config.AutoscalingOptions{},
+			autoscalingOpts: defaultAutoscalingOpts(),
 			discoveryOpts:   &cloudprovider.NodeGroupDiscoveryOptions{},
 			resourceLimiter: cloudprovider.NewResourceLimiter(
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},

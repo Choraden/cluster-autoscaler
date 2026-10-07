@@ -347,9 +347,10 @@ func TestAtomicResizeFilterUnremovableNodes(t *testing.T) {
 			processor := NewAtomicResizeFilteringProcessor()
 			provider := testprovider.NewTestCloudProviderBuilder().Build()
 			for _, ng := range tc.nodeGroups {
-				provider.AddNodeGroupWithCustomOptions(ng.nodeGroupName, 0, 100, ng.nodeGroupTargetSize, &config.NodeGroupAutoscalingOptions{
-					ZeroOrMaxNodeScaling: ng.zeroOrMaxNodeScaling, AllowNonAtomicScaleUpToMax: tc.allowNonAtomicScaleUpToMax,
-				})
+				ngOpts := config.DefaultNodeGroupAutoscalingOptions()
+				ngOpts.ZeroOrMaxNodeScaling = ng.zeroOrMaxNodeScaling
+				ngOpts.AllowNonAtomicScaleUpToMax = tc.allowNonAtomicScaleUpToMax
+				provider.AddNodeGroupWithCustomOptions(ng.nodeGroupName, 0, 100, ng.nodeGroupTargetSize, &ngOpts)
 			}
 			candidates := []simulator.NodeToBeRemoved{}
 			for _, node := range tc.removableCandidates {
@@ -361,9 +362,7 @@ func TestAtomicResizeFilterUnremovableNodes(t *testing.T) {
 				provider.AddNode(node.nodeGroup, node.node)
 				nodes = append(nodes, node.node)
 			}
-			context, _ := NewScaleTestAutoscalingContext(config.AutoscalingOptions{
-				NodeGroupDefaults: config.NodeGroupAutoscalingOptions{},
-			}, &fake.Clientset{}, nil, provider, nil, nil, nil)
+			context, _ := NewScaleTestAutoscalingContext(config.DefaultAutoscalingOptions(), &fake.Clientset{}, nil, provider, nil, nil, nil)
 			clustersnapshot.InitializeClusterSnapshotOrDie(t, context.ClusterSnapshot, nodes, nil)
 
 			toBeRemoved, unRemovable := processor.FilterUnremovableNodes(gocontext.Background(), &context, tc.scaleDownContext, candidates)
