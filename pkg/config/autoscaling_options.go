@@ -377,6 +377,8 @@ type AutoscalingOptions struct {
 	CapacitybufferPodInjectionEnabled bool
 	// CapacityBufferPodDryRunEnabled tells if CA should use server dry run to build managed pod templates for the buffers
 	CapacityBufferPodDryRunEnabled bool
+	// CapacityBufferReadyReplicas tells if CA should reconcile readyReplicas status field of capacity buffers.
+	CapacityBufferReadyReplicasEnabled bool
 	// MaxNodeSkipEvalTimeTrackerEnabled is used to enabled/disable the tracking of maximum evaluation time of a node being skipped during ScaleDown.
 	MaxNodeSkipEvalTimeTrackerEnabled bool
 	// NodeRemovalLatencyTrackingEnabled is used to enable/disable node removal latency tracking.
