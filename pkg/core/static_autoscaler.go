@@ -362,13 +362,19 @@ func (a *StaticAutoscaler) RunOnce(ctx context.Context, currentTime time.Time) c
 		a.statusUpdate(ctx, state)
 	}()
 
-	abort, err = a.processLoopState(ctx, state)
+	abort, err = a.reconcileCluster(ctx, state.currentTime)
 	if err != nil {
 		return err
 	}
 	if abort {
 		return nil
 	}
+
+	if err = a.handleUpcomingNodes(ctx, state); err != nil {
+		return err
+	}
+
+	a.filterUnschedulablePods(ctx, state)
 
 	_ = a.scaleUp(ctx, state)
 	// Error is ignored here as it is already logged internally by instrumentedScaleUp.
@@ -502,7 +508,10 @@ func (a *StaticAutoscaler) initializeLoopState(ctx context.Context, state *loopS
 	return false, nil
 }
 
-func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopState) (bool, caerrors.AutoscalerError) {
+// reconcileCluster reconciles the cluster with the cloud provider (removes old unregistered
+// nodes, deletes nodes created with errors, fixes node group sizes) and checks whether the cluster is
+// healthy enough for autoscaling. It returns true if the current iteration should be aborted.
+func (a *StaticAutoscaler) reconcileCluster(ctx context.Context, currentTime time.Time) (bool, caerrors.AutoscalerError) {
 	logger := klog.FromContext(ctx)
 	autoscalingCtx := a.AutoscalingContext
 
@@ -512,7 +521,7 @@ func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopStat
 	if len(unregisteredNodes) > 0 {
 		logger.V(1).Info("unregistered nodes present", "unregisteredNodesCount", len(unregisteredNodes))
 		removedAny, err := a.removeOldUnregisteredNodes(ctx, unregisteredNodes,
-			a.clusterStateRegistry, state.currentTime, autoscalingCtx.LogRecorder)
+			a.clusterStateRegistry, currentTime, autoscalingCtx.LogRecorder)
 		// There was a problem with removing unregistered nodes. Retry in the next loop.
 		if err != nil {
 			logger.Info("Failed to remove unregistered nodes", "err", err)
@@ -534,7 +543,7 @@ func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopStat
 	// Check if there has been a constant difference between the number of nodes in k8s and
 	// the number of nodes on the cloud provider side.
 	// TODO: andrewskim - add protection for ready AWS nodes.
-	fixedSomething, err := fixNodeGroupSize(ctx, autoscalingCtx, a.clusterStateRegistry, state.currentTime)
+	fixedSomething, err := fixNodeGroupSize(ctx, autoscalingCtx, a.clusterStateRegistry, currentTime)
 	if err != nil {
 		logger.Error(err, "Failed to fix node group sizes")
 		return false, caerrors.ToAutoscalerError(caerrors.CloudProviderError, err)
@@ -546,10 +555,15 @@ func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopStat
 
 	metrics.UpdateLastTime(metrics.Autoscaling, time.Now())
 
-	// SchedulerUnprocessed might be zero here if it was disabled
-	metrics.UpdateUnschedulablePodsCount(len(state.podsBySchedulability.Unschedulable), len(state.podsBySchedulability.Unprocessed))
-	// Treat unknown pods as unschedulable, pod list processor will remove schedulable pods
-	state.podsBySchedulability.Unschedulable = append(state.podsBySchedulability.Unschedulable, state.podsBySchedulability.Unprocessed...)
+	return false, nil
+}
+
+// handleUpcomingNodes injects fake upcoming nodes into the ClusterSnapshot and removes
+// registered-but-not-yet-started upcoming nodes from state.allNodes and the ClusterSnapshot. It then
+// refreshes state.allNodeInfos from the ClusterSnapshot.
+func (a *StaticAutoscaler) handleUpcomingNodes(ctx context.Context, state *loopState) caerrors.AutoscalerError {
+	logger := klog.FromContext(ctx)
+
 	// Upcoming nodes are recently created nodes that haven't registered in the cluster yet, or haven't become ready yet.
 	upcomingCounts, registeredUpcoming := a.clusterStateRegistry.GetUpcomingNodes(ctx)
 	// For each upcoming node we inject a placeholder node faked to appear ready into the cluster snapshot, so that we can pack unschedulable pods on
@@ -560,7 +574,7 @@ func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopStat
 	upcomingNodes, err := a.addUpcomingNodesToClusterSnapshot(ctx, upcomingCounts, templateNodeInfos, "upcoming-%d")
 	if err != nil {
 		logger.Error(err, "Failed adding upcoming nodes to cluster snapshot")
-		return false, caerrors.ToAutoscalerError(caerrors.InternalError, err)
+		return caerrors.ToAutoscalerError(caerrors.InternalError, err)
 	}
 	logger.V(4).Info("Upcoming nodes", "nodesCount", len(upcomingNodes))
 	// Some upcoming nodes can already be registered in the cluster, but not yet ready - we still inject replacements for them above. The actual registered nodes
@@ -580,7 +594,7 @@ func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopStat
 			// ErrNodeNotFound shouldn't happen (so it needs to be logged above if it does), but what we care about here is that the
 			// node is not in the snapshot - so we don't have to error out in that case.
 			if !errors.Is(err, clustersnapshot.ErrNodeNotFound) {
-				return false, caerrors.ToAutoscalerError(caerrors.InternalError, err)
+				return caerrors.ToAutoscalerError(caerrors.InternalError, err)
 			}
 		}
 	}
@@ -591,6 +605,22 @@ func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopStat
 		a.AutoscalingContext.DebuggingSnapshotter.SetClusterNodes(ctx, state.allNodeInfos)
 	}
 
+	return nil
+}
+
+// filterUnschedulablePods runs the PodListProcessor on the unschedulable (and unprocessed) pods and
+// filters out pods that are too young, storing the pods that scale-up should help in state.unschedulablePodsToHelp.
+// It has to be called after the upcoming nodes are injected into the ClusterSnapshot, so that pods which fit on
+// them are filtered out and don't trigger another scale-up.
+func (a *StaticAutoscaler) filterUnschedulablePods(ctx context.Context, state *loopState) {
+	logger := klog.FromContext(ctx)
+
+	// SchedulerUnprocessed might be zero here if it was disabled
+	metrics.UpdateUnschedulablePodsCount(len(state.podsBySchedulability.Unschedulable), len(state.podsBySchedulability.Unprocessed))
+	// Treat unknown pods as unschedulable, pod list processor will remove schedulable pods
+	state.podsBySchedulability.Unschedulable = append(state.podsBySchedulability.Unschedulable, state.podsBySchedulability.Unprocessed...)
+
+	var err error
 	state.unschedulablePodsToHelp, err = a.processors.PodListProcessor.Process(ctx, a.AutoscalingContext, state.podsBySchedulability.Unschedulable)
 
 	if err != nil {
@@ -599,8 +629,6 @@ func (a *StaticAutoscaler) processLoopState(ctx context.Context, state *loopStat
 
 	// finally, filter out pods that are too "young" to safely be considered for a scale-up (delay is configurable)
 	state.unschedulablePodsToHelp = a.filterOutYoungPods(ctx, state.unschedulablePodsToHelp, state.currentTime)
-
-	return false, nil
 }
 
 func (a *StaticAutoscaler) scaleUp(ctx context.Context, state *loopState) caerrors.AutoscalerError {
