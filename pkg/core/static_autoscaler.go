@@ -700,34 +700,42 @@ func (a *StaticAutoscaler) statusUpdate(ctx context.Context, state *loopState) {
 }
 
 func (a *StaticAutoscaler) shouldScaleUp(ctx context.Context, state *loopState) (bool, *status.ScaleUpStatus) {
-	logger := klog.FromContext(ctx)
-
-	if a.GracefulDegradationEnabled && a.GracefulDegradationLoopCount > 0 && a.GracefulDegradationLoopCount%gracefulDegradationCycle == 0 {
+	if a.inGracefulDegradationScaleUpCooldown() {
 		return false, &status.ScaleUpStatus{Result: status.ScaleUpInCooldown}
 	}
 
 	if len(state.unschedulablePodsToHelp) == 0 {
-		logger.V(1).Info("No unschedulable pods")
+		klog.FromContext(ctx).V(1).Info("No unschedulable pods")
 		return false, &status.ScaleUpStatus{Result: status.ScaleUpNotNeeded}
 	}
 
-	var skippedStatus *status.ScaleUpStatus
-	if a.MaxNodesTotal > 0 && len(state.readyNodes) >= a.MaxNodesTotal {
-		logger.Info("Max total nodes in cluster reached", "maxNodesTotal", a.MaxNodesTotal, "readyNodesCount", len(state.readyNodes))
-		a.LogRecorder.Eventf(apiv1.EventTypeWarning, "MaxNodesTotalReached",
-			"Max total nodes in cluster reached: %v", a.MaxNodesTotal)
+	if skippedStatus := a.checkScaleUpConstraints(state); skippedStatus != nil {
+		if a.shouldForceScaleUp(state.unschedulablePodsToHelp) {
+			klog.FromContext(ctx).V(1).Info("Forcing scale up")
+			return true, nil
+		}
+		a.recordScaleUpBlocked(ctx, skippedStatus, state)
+		return false, skippedStatus
+	}
 
-		noScaleUpInfoForPods := make([]status.NoScaleUpInfo, len(state.unschedulablePodsToHelp))
-		for i, pod := range state.unschedulablePodsToHelp {
-			noScaleUpInfoForPods[i] = status.NoScaleUpInfo{
-				Pod: pod,
-			}
-		}
-		skippedStatus = &status.ScaleUpStatus{
+	return true, nil
+}
+
+func (a *StaticAutoscaler) inGracefulDegradationScaleUpCooldown() bool {
+	return a.GracefulDegradationEnabled && a.GracefulDegradationLoopCount > 0 && a.GracefulDegradationLoopCount%gracefulDegradationCycle == 0
+}
+
+func (a *StaticAutoscaler) checkScaleUpConstraints(state *loopState) *status.ScaleUpStatus {
+	if a.maxNodesTotalReached(len(state.readyNodes)) {
+		return &status.ScaleUpStatus{
 			Result:                  status.ScaleUpLimitedByMaxNodesTotal,
-			PodsRemainUnschedulable: noScaleUpInfoForPods,
+			PodsRemainUnschedulable: noScaleUpInfoForPods(state.unschedulablePodsToHelp),
 		}
-	} else if len(a.BypassedSchedulers) == 0 && allPodsAreNew(state.unschedulablePodsToHelp, state.currentTime) {
+	}
+	if len(a.BypassedSchedulers) == 0 && allPodsAreNew(state.unschedulablePodsToHelp, state.currentTime) {
+		// TODO(Choraden): Decouple ScaleDown control from here.
+		// It is only to maintain legacy behavior. It should be moved to a separate scaleDown controller.
+		//
 		// The assumption here is that these pods have been created very recently and probably there
 		// is more pods to come. In theory, we could check the newest pod time but then if pod were created
 		// slowly but at the pace of 1 every 2 seconds then no scale up would be triggered for long time.
@@ -735,19 +743,43 @@ func (a *StaticAutoscaler) shouldScaleUp(ctx context.Context, state *loopState) 
 		// This logic only makes sense if CA is not trying to react quickly
 		// by bypassing scheduler marking pods as unschedulable.
 		a.processorCallbacks.DisableScaleDownForLoop()
-		logger.V(1).Info("Unschedulable pods are very new, waiting one iteration for more")
-		skippedStatus = &status.ScaleUpStatus{Result: status.ScaleUpInCooldown}
-	}
 
-	if skippedStatus == nil || a.shouldForceScaleUp(state.unschedulablePodsToHelp) {
-		return true, nil
+		return &status.ScaleUpStatus{
+			Result: status.ScaleUpInCooldown,
+		}
 	}
+	return nil
+}
 
-	return false, skippedStatus
+func noScaleUpInfoForPods(pods []*apiv1.Pod) []status.NoScaleUpInfo {
+	noScaleUpInfo := make([]status.NoScaleUpInfo, len(pods))
+	for i, pod := range pods {
+		noScaleUpInfo[i] = status.NoScaleUpInfo{
+			Pod: pod,
+		}
+	}
+	return noScaleUpInfo
+}
+
+func (a *StaticAutoscaler) maxNodesTotalReached(readyNodesCount int) bool {
+	return a.MaxNodesTotal > 0 && readyNodesCount >= a.MaxNodesTotal
 }
 
 func (a *StaticAutoscaler) shouldForceScaleUp(unschedulablePods []*apiv1.Pod) bool {
 	return a.processors.ScaleUpEnforcer != nil && a.processors.ScaleUpEnforcer.ShouldForceScaleUp(unschedulablePods)
+}
+
+func (a *StaticAutoscaler) recordScaleUpBlocked(ctx context.Context, s *status.ScaleUpStatus, state *loopState) {
+	switch s.Result {
+	case status.ScaleUpLimitedByMaxNodesTotal:
+		klog.FromContext(ctx).Info("Max total nodes in cluster reached", "maxNodesTotal", a.MaxNodesTotal, "readyNodesCount", len(state.readyNodes))
+		a.LogRecorder.Eventf(apiv1.EventTypeWarning, "MaxNodesTotalReached",
+			"Max total nodes in cluster reached: %v", a.MaxNodesTotal)
+	case status.ScaleUpInCooldown:
+		klog.FromContext(ctx).V(1).Info("Unschedulable pods are very new, waiting one iteration for more")
+	default:
+		klog.FromContext(ctx).V(1).Info("Scale up is blocked, could not determine reason", "result", s.Result)
+	}
 }
 
 func (a *StaticAutoscaler) processScaleUpStatus(ctx context.Context, scaleUpStatus *status.ScaleUpStatus) {
