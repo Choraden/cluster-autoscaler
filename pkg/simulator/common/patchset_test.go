@@ -19,6 +19,8 @@ package common
 import (
 	"fmt"
 	"maps"
+	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"k8s.io/utils/ptr"
@@ -547,7 +549,13 @@ func TestPatchSetCache(t *testing.T) {
 			patchLayers:     []map[string]*int{},
 			mutatePatchSet:  func(ps *PatchSet[string, int]) {},
 			wantCache:       map[string]*int{},
-			wantCacheInSync: false,
+			wantCacheInSync: true,
+		},
+		"Initial_OnlyDeletions_CacheInSync": {
+			patchLayers:     []map[string]*int{{"a": nil}, {"b": nil}},
+			mutatePatchSet:  func(ps *PatchSet[string, int]) {},
+			wantCache:       map[string]*int{},
+			wantCacheInSync: true,
 		},
 		"Initial_WithData_NoCacheAccess": {
 			patchLayers:     []map[string]*int{{"a": ptr.To(1)}},
@@ -585,7 +593,7 @@ func TestPatchSetCache(t *testing.T) {
 				ps.SetCurrent("x", 10)
 			},
 			wantCache:       map[string]*int{"x": ptr.To(10)},
-			wantCacheInSync: false,
+			wantCacheInSync: true,
 		},
 		"SetCurrent_UpdatesCache_OverwriteKey": {
 			patchLayers: []map[string]*int{{"x": ptr.To(5)}},
@@ -615,14 +623,77 @@ func TestPatchSetCache(t *testing.T) {
 			wantCache:       map[string]*int{},
 			wantCacheInSync: false,
 		},
-		"Revert_OnSyncedCache_SetsCacheNotInSync": {
+		"Revert_OnSyncedCache_RepairsCacheAndKeepsInSync": {
 			patchLayers: []map[string]*int{{"a": ptr.To(1)}, {"b": ptr.To(2)}},
 			mutatePatchSet: func(ps *PatchSet[string, int]) {
 				ps.AsMap()
 				ps.Revert()
 			},
 			wantCache:       map[string]*int{"a": ptr.To(1)},
-			wantCacheInSync: false,
+			wantCacheInSync: true,
+		},
+		"Revert_OnSyncedCache_RestoresOverwrittenAndDeletedKeys": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.AsMap()
+				ps.Fork()
+				ps.SetCurrent("a", 11)
+				ps.DeleteCurrent("b")
+				ps.SetCurrent("c", 3)
+				ps.DeleteCurrent("never-existed")
+				ps.Revert()
+			},
+			wantCache:       map[string]*int{"a": ptr.To(1), "b": ptr.To(2)},
+			wantCacheInSync: true,
+		},
+		"Revert_OnSyncedCache_ResolvesFromMiddleLayer": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}, {"a": ptr.To(11), "b": nil}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.AsMap()
+				ps.Fork()
+				ps.DeleteCurrent("a")
+				ps.SetCurrent("b", 22)
+				ps.Revert()
+			},
+			wantCache:       map[string]*int{"a": ptr.To(11)},
+			wantCacheInSync: true,
+		},
+		"FindValue_MissOnSyncedCache_DoesNotStoreNegativeEntry": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1)}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.AsMap()
+				ps.FindValue("x")
+			},
+			wantCache:       map[string]*int{"a": ptr.To(1)},
+			wantCacheInSync: true,
+		},
+		"DeleteCurrent_OnSyncedCache_RemovesEntry": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.AsMap()
+				ps.Fork()
+				ps.DeleteCurrent("a")
+			},
+			wantCache:       map[string]*int{"b": ptr.To(2)},
+			wantCacheInSync: true,
+		},
+		"AsMap_DropsNegativeEntries": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": nil}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.FindValue("b")
+				ps.FindValue("x")
+				ps.AsMap()
+			},
+			wantCache:       map[string]*int{"a": ptr.To(1)},
+			wantCacheInSync: true,
+		},
+		"Len_SyncsCache": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}, {"b": nil}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.Len()
+			},
+			wantCache:       map[string]*int{"a": ptr.To(1)},
+			wantCacheInSync: true,
 		},
 		"Commit_DoesNotInvalidateCache_IfValuesConsistent": {
 			patchLayers: []map[string]*int{{"a": ptr.To(1)}, {"b": ptr.To(2)}},
@@ -708,6 +779,432 @@ func buildTestPatchSet[K comparable, V any](t *testing.T, patchLayers []map[K]*V
 	return NewPatchSet(patches...)
 }
 
+func TestPatchSetNestedForkRevertKeepsCacheInSync(t *testing.T) {
+	ps := buildTestPatchSet(t, []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2), "c": ptr.To(3)}})
+
+	// assertState verifies the effective state through all read APIs and
+	// that the cache stays in sync once it got synced by the first read.
+	assertState := func(step string, want map[string]int) {
+		t.Helper()
+		if got := ps.AsMap(); !maps.Equal(got, want) {
+			t.Errorf("%s: AsMap() got %v, want %v", step, got, want)
+		}
+		if !ps.cacheInSync {
+			t.Errorf("%s: cacheInSync got false, want true", step)
+		}
+		gotValues := ps.ValuesSlice()
+		slices.Sort(gotValues)
+		wantValues := slices.Sorted(maps.Values(want))
+		if !slices.Equal(gotValues, wantValues) {
+			t.Errorf("%s: ValuesSlice() got %v, want %v", step, gotValues, wantValues)
+		}
+		if iterValues := slices.Sorted(ps.Values()); !slices.Equal(iterValues, wantValues) {
+			t.Errorf("%s: Values() got %v, want %v", step, iterValues, wantValues)
+		}
+		if got := ps.Len(); got != len(want) {
+			t.Errorf("%s: Len() got %d, want %d", step, got, len(want))
+		}
+		for _, key := range []string{"a", "b", "c", "d", "e", "missing"} {
+			wantValue, wantFound := want[key]
+			gotValue, gotFound := ps.FindValue(key)
+			if gotFound != wantFound || gotValue != wantValue {
+				t.Errorf("%s: FindValue(%q) got (%v, %v), want (%v, %v)", step, key, gotValue, gotFound, wantValue, wantFound)
+			}
+		}
+		for key, value := range ps.cache {
+			if value == nil {
+				t.Errorf("%s: in-sync cache contains a negative entry for key %q", step, key)
+			}
+		}
+	}
+
+	assertState("initial", map[string]int{"a": 1, "b": 2, "c": 3})
+
+	ps.Fork()
+	ps.SetCurrent("a", 10)
+	ps.SetCurrent("d", 4)
+	assertState("fork#1", map[string]int{"a": 10, "b": 2, "c": 3, "d": 4})
+
+	ps.Fork()
+	ps.SetCurrent("b", 20)
+	ps.DeleteCurrent("a")
+	ps.DeleteCurrent("c")
+	ps.SetCurrent("e", 5)
+	assertState("fork#2", map[string]int{"b": 20, "d": 4, "e": 5})
+
+	ps.Revert()
+	assertState("revert fork#2", map[string]int{"a": 10, "b": 2, "c": 3, "d": 4})
+
+	ps.Fork()
+	ps.DeleteCurrent("d")
+	ps.SetCurrent("c", 30)
+	assertState("fork#2'", map[string]int{"a": 10, "b": 2, "c": 30})
+
+	ps.Commit()
+	assertState("commit fork#2'", map[string]int{"a": 10, "b": 2, "c": 30})
+
+	ps.Revert()
+	assertState("revert fork#1", map[string]int{"a": 1, "b": 2, "c": 3})
+
+	// Reverting the base layer is a no-op.
+	ps.Revert()
+	assertState("revert base", map[string]int{"a": 1, "b": 2, "c": 3})
+
+	// Deep fork stack with the same key touched at every level:
+	// layers: a=100, del(a), a=102, del(a), a=104.
+	for i := 0; i < 5; i++ {
+		ps.Fork()
+		if i%2 == 0 {
+			ps.SetCurrent("a", 100+i)
+		} else {
+			ps.DeleteCurrent("a")
+		}
+	}
+	assertState("deep fork", map[string]int{"a": 104, "b": 2, "c": 3})
+	ps.Revert()
+	assertState("deep revert#1", map[string]int{"b": 2, "c": 3})
+	ps.Revert()
+	assertState("deep revert#2", map[string]int{"a": 102, "b": 2, "c": 3})
+	ps.Revert()
+	assertState("deep revert#3", map[string]int{"b": 2, "c": 3})
+	ps.Revert()
+	assertState("deep revert#4", map[string]int{"a": 100, "b": 2, "c": 3})
+	ps.Revert()
+	assertState("deep revert#5", map[string]int{"a": 1, "b": 2, "c": 3})
+}
+
+func TestPatchSetValuesSliceAndLen(t *testing.T) {
+	tests := map[string]struct {
+		patchLayers    []map[string]*int
+		mutatePatchSet func(ps *PatchSet[string, int])
+		wantValues     []int
+	}{
+		"Empty_NoLayers": {
+			patchLayers:    []map[string]*int{},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {},
+			wantValues:     []int{},
+		},
+		"Empty_SingleEmptyLayer": {
+			patchLayers:    []map[string]*int{{}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {},
+			wantValues:     []int{},
+		},
+		"Populated_MultipleLayers": {
+			patchLayers:    []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}, {"b": nil, "c": ptr.To(3)}, {"a": ptr.To(11)}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {},
+			wantValues:     []int{3, 11},
+		},
+		"Populated_AfterSetAndDeleteOnSyncedCache": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.AsMap()
+				ps.Fork()
+				ps.SetCurrent("c", 3)
+				ps.DeleteCurrent("a")
+			},
+			wantValues: []int{2, 3},
+		},
+		"Reverted_OnSyncedCache": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.AsMap()
+				ps.Fork()
+				ps.SetCurrent("c", 3)
+				ps.DeleteCurrent("a")
+				ps.Revert()
+			},
+			wantValues: []int{1, 2},
+		},
+		"Reverted_OnNotSyncedCache": {
+			patchLayers: []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2)}, {"a": nil, "c": ptr.To(3)}},
+			mutatePatchSet: func(ps *PatchSet[string, int]) {
+				ps.FindValue("a")
+				ps.FindValue("c")
+				ps.Revert()
+			},
+			wantValues: []int{1, 2},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ps := buildTestPatchSet(t, tc.patchLayers)
+			tc.mutatePatchSet(ps)
+
+			if got := ps.Len(); got != len(tc.wantValues) {
+				t.Errorf("Len() got %d, want %d", got, len(tc.wantValues))
+			}
+			gotValues := ps.ValuesSlice()
+			if gotValues == nil {
+				t.Errorf("ValuesSlice() got nil, want non-nil slice")
+			}
+			slices.Sort(gotValues)
+			if !slices.Equal(gotValues, tc.wantValues) {
+				t.Errorf("ValuesSlice() got %v, want %v", gotValues, tc.wantValues)
+			}
+			if iterValues := slices.Sorted(ps.Values()); !slices.Equal(iterValues, tc.wantValues) {
+				t.Errorf("Values() got %v, want %v", iterValues, tc.wantValues)
+			}
+		})
+	}
+}
+
+func TestPatchSetValuesEarlyBreak(t *testing.T) {
+	ps := buildTestPatchSet(t, []map[string]*int{{"a": ptr.To(1), "b": ptr.To(2), "c": ptr.To(3)}})
+	count := 0
+	for range ps.Values() {
+		count++
+		if count == 2 {
+			break
+		}
+	}
+	if count != 2 {
+		t.Errorf("Values() early break: got %d iterations, want 2", count)
+	}
+}
+
+func TestClonePatchSetCacheState(t *testing.T) {
+	ps := buildTestPatchSet(t, []map[string]*int{{"a": ptr.To(1)}})
+	ps.AsMap()
+	ps.Fork()
+	ps.SetCurrent("b", 2)
+
+	cloned := ClonePatchSet(ps, func(k string) string { return k }, func(v int) int { return v })
+	want := map[string]int{"a": 1, "b": 2}
+	if got := cloned.AsMap(); !maps.Equal(got, want) {
+		t.Errorf("cloned AsMap() got %v, want %v", got, want)
+	}
+	cloned.Revert()
+	if got, want := cloned.AsMap(), map[string]int{"a": 1}; !maps.Equal(got, want) {
+		t.Errorf("cloned AsMap() after Revert() got %v, want %v", got, want)
+	}
+	if got := ps.AsMap(); !maps.Equal(got, want) {
+		t.Errorf("original AsMap() changed after reverting the clone: got %v, want %v", got, want)
+	}
+}
+
+// referencePatchSet is a deliberately naive model of PatchSet used for
+// differential testing: it stores the full effective state for every layer.
+type referencePatchSet struct {
+	states []map[int]int
+}
+
+func (r *referencePatchSet) top() map[int]int {
+	if len(r.states) == 0 {
+		r.states = append(r.states, map[int]int{})
+	}
+	return r.states[len(r.states)-1]
+}
+
+func (r *referencePatchSet) effective() map[int]int {
+	if len(r.states) == 0 {
+		return map[int]int{}
+	}
+	return r.states[len(r.states)-1]
+}
+
+func (r *referencePatchSet) fork() {
+	r.states = append(r.states, maps.Clone(r.effective()))
+}
+
+func (r *referencePatchSet) commit() {
+	if len(r.states) < 2 {
+		return
+	}
+	r.states[len(r.states)-2] = r.states[len(r.states)-1]
+	r.states = r.states[:len(r.states)-1]
+}
+
+func (r *referencePatchSet) revert() {
+	if len(r.states) <= 1 {
+		return
+	}
+	r.states = r.states[:len(r.states)-1]
+}
+
+// patchSetOpReader turns a byte stream into a sequence of operation arguments.
+type patchSetOpReader struct {
+	data []byte
+}
+
+func (r *patchSetOpReader) next() (byte, bool) {
+	if len(r.data) == 0 {
+		return 0, false
+	}
+	b := r.data[0]
+	r.data = r.data[1:]
+	return b, true
+}
+
+const differentialKeySpace = 16
+
+// runPatchSetDifferential interprets data as a sequence of PatchSet operations and
+// compares the results of all read operations against referencePatchSet after each step.
+func runPatchSetDifferential(t *testing.T, data []byte) {
+	t.Helper()
+	r := &patchSetOpReader{data: data}
+	ref := &referencePatchSet{}
+
+	// Initial layers passed directly to NewPatchSet.
+	layersCount, _ := r.next()
+	var patches []*Patch[int, int]
+	for range layersCount % 4 {
+		patch := NewPatch[int, int]()
+		entries, _ := r.next()
+		for range entries % 8 {
+			key, _ := r.next()
+			value, _ := r.next()
+			if value%4 == 0 {
+				patch.Delete(int(key % differentialKeySpace))
+			} else {
+				patch.Set(int(key%differentialKeySpace), int(value))
+			}
+		}
+		patches = append(patches, patch)
+		state := maps.Clone(ref.effective())
+		for key, value := range patch.modified {
+			state[key] = value
+		}
+		for key := range patch.deleted {
+			delete(state, key)
+		}
+		ref.states = append(ref.states, state)
+	}
+	ps := NewPatchSet(patches...)
+
+	var history []string
+	fail := func(format string, args ...any) {
+		t.Helper()
+		const maxHistory = 30
+		recent := history
+		if len(recent) > maxHistory {
+			recent = recent[len(recent)-maxHistory:]
+		}
+		t.Fatalf("after %d ops (last %d: %v): "+format, append([]any{len(history), len(recent), recent}, args...)...)
+	}
+
+	checkCacheInvariants := func() {
+		t.Helper()
+		want := ref.effective()
+		for key, cached := range ps.cache {
+			wantValue, wantFound := want[key]
+			if cached == nil {
+				if ps.cacheInSync {
+					fail("in-sync cache holds a negative entry for key %d", key)
+				}
+				if wantFound {
+					fail("cache holds a negative entry for existing key %d (want %d)", key, wantValue)
+				}
+				continue
+			}
+			if !wantFound || *cached != wantValue {
+				fail("stale cache entry for key %d: got %d, want (%d, %v)", key, *cached, wantValue, wantFound)
+			}
+		}
+		if ps.cacheInSync && len(ps.cache) != len(want) {
+			fail("in-sync cache has %d entries, want %d", len(ps.cache), len(want))
+		}
+	}
+
+	for {
+		opByte, ok := r.next()
+		if !ok {
+			break
+		}
+		argKey, _ := r.next()
+		key := int(argKey % differentialKeySpace)
+
+		switch opByte % 12 {
+		case 0:
+			history = append(history, "Fork")
+			ps.Fork()
+			ref.fork()
+		case 1:
+			history = append(history, "Commit")
+			ps.Commit()
+			ref.commit()
+		case 2, 3:
+			history = append(history, "Revert")
+			ps.Revert()
+			ref.revert()
+		case 4, 5, 6:
+			value, _ := r.next()
+			history = append(history, fmt.Sprintf("Set(%d,%d)", key, value))
+			ps.SetCurrent(key, int(value))
+			ref.top()[key] = int(value)
+		case 7:
+			history = append(history, fmt.Sprintf("Delete(%d)", key))
+			ps.DeleteCurrent(key)
+			delete(ref.top(), key)
+		case 8:
+			history = append(history, fmt.Sprintf("Find(%d)", key))
+			gotValue, gotFound := ps.FindValue(key)
+			wantValue, wantFound := ref.effective()[key]
+			if gotValue != wantValue || gotFound != wantFound {
+				fail("FindValue(%d) got (%d, %v), want (%d, %v)", key, gotValue, gotFound, wantValue, wantFound)
+			}
+		case 9:
+			history = append(history, "AsMap")
+			if got, want := ps.AsMap(), ref.effective(); !maps.Equal(got, want) {
+				fail("AsMap() got %v, want %v", got, want)
+			}
+		case 10:
+			history = append(history, "ValuesSlice")
+			got := ps.ValuesSlice()
+			slices.Sort(got)
+			if want := slices.Sorted(maps.Values(ref.effective())); !slices.Equal(got, want) {
+				fail("ValuesSlice() got %v, want %v", got, want)
+			}
+			if got := slices.Sorted(ps.Values()); !slices.Equal(got, slices.Sorted(maps.Values(ref.effective()))) {
+				fail("Values() got %v", got)
+			}
+		case 11:
+			history = append(history, "Len")
+			if got, want := ps.Len(), len(ref.effective()); got != want {
+				fail("Len() got %d, want %d", got, want)
+			}
+		}
+
+		if len(ps.patches) != len(ref.states) {
+			fail("got %d patches, want %d", len(ps.patches), len(ref.states))
+		}
+		checkCacheInvariants()
+	}
+
+	// Final full comparison.
+	if got, want := ps.AsMap(), ref.effective(); !maps.Equal(got, want) {
+		fail("final AsMap() got %v, want %v", got, want)
+	}
+}
+
+// TestPatchSetDifferential runs a large number of pseudo-random operations against
+// PatchSet and a naive reference implementation, comparing them at every step.
+func TestPatchSetDifferential(t *testing.T) {
+	const seeds = 20
+	const opsPerSeed = 5000
+	for seed := uint64(0); seed < seeds; seed++ {
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(seed, 0x5eed))
+			// ~3 bytes per op on average.
+			data := make([]byte, opsPerSeed*3)
+			for i := range data {
+				data[i] = byte(rng.UintN(256))
+			}
+			runPatchSetDifferential(t, data)
+		})
+	}
+}
+
+func FuzzPatchSetDifferential(f *testing.F) {
+	f.Add([]byte{})
+	f.Add([]byte{0})
+	f.Add([]byte{2, 3, 1, 1, 5, 2, 0, 4, 0, 2, 9, 0, 0, 1, 7, 1, 2, 0, 9, 0})
+	f.Add([]byte{1, 2, 3, 5, 7, 9, 0, 0, 4, 3, 33, 7, 5, 8, 5, 2, 0, 8, 5, 10, 0, 11, 0})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		runPatchSetDifferential(t, data)
+	})
+}
+
 var benchSizes = []int{1000, 10000}
 
 func newBenchPatchSet(n int) *PatchSet[int, *int] {
@@ -764,6 +1261,16 @@ func BenchmarkPatchSetRevert(b *testing.B) {
 				benchSink = listViaAsMap(ps)
 			}
 		})
+		b.Run(fmt.Sprintf("N=%d/ForkModifyRevertValuesSlice", n), func(b *testing.B) {
+			ps := newBenchPatchSet(n)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				modify(ps, i, n)
+				ps.Revert()
+				benchSink = ps.ValuesSlice()
+			}
+		})
 	}
 }
 
@@ -776,6 +1283,26 @@ func BenchmarkPatchSetValuesSlice(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				benchSink = listViaAsMap(ps)
+			}
+		})
+		b.Run(fmt.Sprintf("N=%d/ValuesSlice", n), func(b *testing.B) {
+			ps := newBenchPatchSet(n)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchSink = ps.ValuesSlice()
+			}
+		})
+		b.Run(fmt.Sprintf("N=%d/ValuesIter", n), func(b *testing.B) {
+			ps := newBenchPatchSet(n)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				count := 0
+				for range ps.Values() {
+					count++
+				}
+				benchFoundSink = count == n
 			}
 		})
 	}
