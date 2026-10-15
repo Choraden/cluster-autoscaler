@@ -17,6 +17,7 @@ limitations under the License.
 package common
 
 import (
+	"fmt"
 	"maps"
 	"testing"
 
@@ -705,4 +706,109 @@ func buildTestPatchSet[K comparable, V any](t *testing.T, patchLayers []map[K]*V
 	}
 
 	return NewPatchSet(patches...)
+}
+
+var benchSizes = []int{1000, 10000}
+
+func newBenchPatchSet(n int) *PatchSet[int, *int] {
+	base := make(map[int]*int, n)
+	for i := 0; i < n; i++ {
+		v := i
+		base[i] = &v
+	}
+	ps := NewPatchSet(NewPatchFromMap(base))
+	ps.AsMap() // sync the cache, as happens after the first List in a loop
+	return ps
+}
+
+func listViaAsMap(ps *PatchSet[int, *int]) []*int {
+	m := ps.AsMap()
+	res := make([]*int, 0, len(m))
+	for _, v := range m {
+		res = append(res, v)
+	}
+	return res
+}
+
+var benchSink []*int
+var benchFoundSink bool
+
+// BenchmarkPatchSetRevert measures a typical simulation cycle:
+// Fork -> modify a handful of keys -> Revert -> (optionally) list all values.
+func BenchmarkPatchSetRevert(b *testing.B) {
+	modify := func(ps *PatchSet[int, *int], i, n int) {
+		ps.Fork()
+		for k := 0; k < 5; k++ {
+			v := k
+			ps.SetCurrent((i+k)%n, &v)
+		}
+		ps.DeleteCurrent((i + 7) % n)
+	}
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("N=%d/ForkModifyRevert", n), func(b *testing.B) {
+			ps := newBenchPatchSet(n)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				modify(ps, i, n)
+				ps.Revert()
+			}
+		})
+		b.Run(fmt.Sprintf("N=%d/ForkModifyRevertAsMapList", n), func(b *testing.B) {
+			ps := newBenchPatchSet(n)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				modify(ps, i, n)
+				ps.Revert()
+				benchSink = listViaAsMap(ps)
+			}
+		})
+	}
+}
+
+// BenchmarkPatchSetValuesSlice compares listing values through AsMap() vs ValuesSlice() / Values().
+func BenchmarkPatchSetValuesSlice(b *testing.B) {
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("N=%d/AsMapToSlice", n), func(b *testing.B) {
+			ps := newBenchPatchSet(n)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchSink = listViaAsMap(ps)
+			}
+		})
+	}
+}
+
+// BenchmarkPatchSetColdAsMap measures the first full read of a freshly created PatchSet,
+// which needs to build the cache from scratch.
+func BenchmarkPatchSetColdAsMap(b *testing.B) {
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
+			base := make(map[int]*int, n)
+			for i := 0; i < n; i++ {
+				v := i
+				base[i] = &v
+			}
+			patch := NewPatchFromMap(base)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				ps := NewPatchSet(patch)
+				benchSink = listViaAsMap(ps)
+			}
+		})
+	}
+}
+
+// BenchmarkPatchSetFindValueMiss measures lookups of keys absent from the PatchSet.
+func BenchmarkPatchSetFindValueMiss(b *testing.B) {
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("N=%d/Forked", n), func(b *testing.B) {
+			ps := newBenchPatchSet(n)
+			ps.Fork()
+			ps.Fork()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, benchFoundSink = ps.FindValue(n + i)
+			}
+		})
+	}
 }
