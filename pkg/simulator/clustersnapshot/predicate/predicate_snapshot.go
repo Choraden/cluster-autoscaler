@@ -18,6 +18,7 @@ package predicate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apiv1 "k8s.io/api/core/v1"
@@ -82,6 +83,7 @@ func (s *PredicateSnapshot) SetClusterState(ctx context.Context, nodes []*apiv1.
 	}
 	s.csiSnapshot = csiSnapshot
 
+	nodeLoggingQuota := klogx.NodesLoggingQuota()
 	nodeInfos := make([]*framework.NodeInfo, len(nodes))
 	nodeNameToIdx := make(map[string]int, len(nodes))
 	for i, node := range nodes {
@@ -92,11 +94,15 @@ func (s *PredicateSnapshot) SetClusterState(ctx context.Context, nodes []*apiv1.
 		ni := framework.NewNodeInfo(node, slices)
 
 		if s.enableCSINodeAwareScheduling && csiSnapshot != nil {
-			csiNode, err := csiSnapshot.Get(node.Name)
-			if err != nil {
-				return fmt.Errorf("couldn't obtain csi node: %v", err)
+			// The CSINode object is created by asynchronously after the Node registers, so a Node can
+			// legitimately exist without a backing CSINode for some time.
+			if csiNode, err := csiSnapshot.Get(node.Name); err == nil {
+				ni.SetCSINode(csiNode)
+			} else if errors.Is(err, csisnapshot.ErrCsiNodeNotFound) {
+				klogx.V(4).UpTo(nodeLoggingQuota).Infof("SetClusterState: CSINode for node %q not found in the CSI snapshot, unable to populate node info: %v", node.Name, err)
+			} else {
+				return fmt.Errorf("failed to populate CSI snapshot: %w", err)
 			}
-			ni.SetCSINode(csiNode)
 		}
 
 		nodeInfos[i] = ni

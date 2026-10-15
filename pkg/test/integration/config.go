@@ -117,3 +117,26 @@ func WithProvisioningRequestEnabled() AutoscalingOptionOverride {
 		o.ProvisioningRequestEnabled = true
 	}
 }
+
+// WithCSINodeAwareScheduling enables CSI node aware scheduling (CSINode snapshotting, the CSI custom
+// resources processor and the NodeVolumeLimits scheduler plugin backed by the snapshot).
+func WithCSINodeAwareScheduling() AutoscalingOptionOverride {
+	return func(o *config.AutoscalingOptions) {
+		o.CSINodeAwareSchedulingEnabled = true
+	}
+}
+
+// WithMaxNodeStartupTime sets how long a registered but unready Node is still treated as starting up before it's considered unready.
+func WithMaxNodeStartupTime(d time.Duration) AutoscalingOptionOverride {
+	return func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.MaxNodeStartupTime = d
+	}
+}
+
+// WithMaxNodeProvisionTime sets how long a scale-up request stays active before it times out. A timed-out request
+// backs the NodeGroup off and reverts the scale-up.
+func WithMaxNodeProvisionTime(d time.Duration) AutoscalingOptionOverride {
+	return func(o *config.AutoscalingOptions) {
+		o.NodeGroupDefaults.MaxNodeProvisionTime = d
+	}
+}
