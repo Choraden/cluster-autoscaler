@@ -262,6 +262,11 @@ func (p *PatchSet[K, V]) syncCache() {
 		clear(p.cache)
 	}
 
+	// All the values are stored in a single preallocated backing slice to
+	// avoid a separate heap allocation per key. Its capacity is never
+	// exceeded, so pointers into it stay valid.
+	values := make([]V, 0, keysCount)
+
 	// Resolve keys from the topmost layer down, so that each effective value
 	// is stored exactly once. Keys deleted in upper layers are temporarily
 	// marked with nil entries to shadow values from the lower layers.
@@ -270,7 +275,8 @@ func (p *PatchSet[K, V]) syncCache() {
 		patch := p.patches[i]
 		for key, value := range patch.modified {
 			if _, seen := p.cache[key]; !seen {
-				p.cache[key] = &value
+				values = append(values, value)
+				p.cache[key] = &values[len(values)-1]
 			}
 		}
 		for key := range patch.deleted {
