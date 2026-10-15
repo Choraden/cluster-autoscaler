@@ -151,7 +151,10 @@ func (p *PatchSet[K, V]) repairCacheKey(key K) {
 			break
 		}
 		if value, found := patch.Get(key); found {
-			p.cache[key] = &value
+			// Copy inside the branch so that only the found value is heap
+			// allocated, rather than the loop variable on every iteration.
+			valueCopy := value
+			p.cache[key] = &valueCopy
 			return
 		}
 	}
@@ -185,7 +188,10 @@ func (p *PatchSet[K, V]) FindValue(key K) (value V, found bool) {
 		}
 
 		if foundValue, ok := patch.Get(key); ok {
-			p.cache[key] = &foundValue
+			// Copy inside the branch so that only the found value is heap
+			// allocated, rather than the loop variable on every iteration.
+			valueCopy := foundValue
+			p.cache[key] = &valueCopy
 			return foundValue, true
 		}
 	}

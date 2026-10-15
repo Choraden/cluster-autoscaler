@@ -1344,3 +1344,42 @@ func BenchmarkPatchSetFindValueMiss(b *testing.B) {
 		})
 	}
 }
+
+// TestPatchSetLayerWalkAllocs guards against heap-allocating a value per traversed layer
+// when resolving a key through a deep patch stack (only the found value may be allocated).
+func TestPatchSetLayerWalkAllocs(t *testing.T) {
+	const depth = 50
+	newDeepPatchSet := func() *PatchSet[string, []int] {
+		ps := NewPatchSet(NewPatchFromMap(map[string][]int{"a": {1}}))
+		for i := 0; i < depth; i++ {
+			ps.Fork()
+		}
+		return ps
+	}
+
+	t.Run("FindValue slow path", func(t *testing.T) {
+		ps := newDeepPatchSet()
+		ps.FindValue("a")
+		allocs := testing.AllocsPerRun(100, func() {
+			delete(ps.cache, "a")
+			ps.FindValue("a")
+		})
+		if allocs > 1 {
+			t.Errorf("FindValue() through %d layers: got %v allocs, want <= 1", depth, allocs)
+		}
+	})
+
+	t.Run("Revert cache repair", func(t *testing.T) {
+		ps := newDeepPatchSet()
+		ps.AsMap()
+		allocs := testing.AllocsPerRun(100, func() {
+			ps.repairCacheKey("a")
+		})
+		if allocs > 1 {
+			t.Errorf("repairCacheKey() through %d layers: got %v allocs, want <= 1", depth, allocs)
+		}
+		if !ps.cacheInSync {
+			t.Errorf("cacheInSync got false, want true")
+		}
+	})
+}
