@@ -8,11 +8,13 @@ on:
       - '**/*.go'
       - 'go.mod'
       - 'go.sum'
+      - 'tools/**'
   pull_request:
     paths:
       - '**/*.go'
       - 'go.mod'
       - 'go.sum'
+      - 'tools/**'
 
 permissions:
   contents: read

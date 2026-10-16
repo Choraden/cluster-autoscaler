@@ -8,12 +8,14 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'kind-config.yaml'
+      - 'tools/**'
   pull_request:
     paths:
       - '**/*.go'
       - 'go.mod'
       - 'go.sum'
       - 'kind-config.yaml'
+      - 'tools/**'
 
 permissions:
   contents: read
