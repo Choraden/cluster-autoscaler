@@ -646,11 +646,19 @@ func (a *StaticAutoscaler) scaleUp(ctx context.Context, state *loopState) caerro
 			nodes[i] = nodeInfo.Node()
 		}
 
+		// TODO(Choraden): Stop passing templateNodeInfos explicitly once
+		// scaleup.Orchestrator no longer takes it as an argument.
+		// GetNodeInfos() returns a fresh copy on every call, so it has to be
+		// fetched once here and shared by every iteration of a scale-up salvo:
+		// some Orchestrator implementations modify this map during ScaleUp and
+		// later iterations rely on seeing those modifications.
+		templateNodeInfos := a.AutoscalingContext.TemplateNodeInfoRegistry.GetNodeInfos()
+
 		var typedErr caerrors.AutoscalerError
 		if a.AutoscalingContext.AutoscalingOptions.SalvoScaleUp {
-			state.scaleUpStatus, typedErr = a.runScaleUpSalvo(ctx, state, nodes)
+			state.scaleUpStatus, typedErr = a.runScaleUpSalvo(ctx, state, nodes, templateNodeInfos)
 		} else {
-			_, state.scaleUpStatus, typedErr = a.runSingleScaleUp(ctx, state, nodes)
+			_, state.scaleUpStatus, typedErr = a.runSingleScaleUp(ctx, state, nodes, templateNodeInfos)
 		}
 
 		if state.scaleUpStatus != nil && state.scaleUpStatus.Result == status.ScaleUpSuccessful {
@@ -806,15 +814,14 @@ func (a *StaticAutoscaler) instrumentedScaleUp(
 	return unfilteredPodsTriggeredScaleUp, scaleUpStatus, typedErr
 }
 
-func (a *StaticAutoscaler) runSingleScaleUp(ctx context.Context, state *loopState, nodes []*apiv1.Node) ([]*apiv1.Pod, *status.ScaleUpStatus, caerrors.AutoscalerError) {
-	templateNodeInfos := a.TemplateNodeInfoRegistry.GetNodeInfos()
+func (a *StaticAutoscaler) runSingleScaleUp(ctx context.Context, state *loopState, nodes []*apiv1.Node, templateNodeInfos map[string]*framework.NodeInfo) ([]*apiv1.Pod, *status.ScaleUpStatus, caerrors.AutoscalerError) {
 	scaleUpFn := func() (*status.ScaleUpStatus, caerrors.AutoscalerError) {
 		return a.scaleUpOrchestrator.ScaleUp(ctx, state.unschedulablePodsToHelp, nodes, state.daemonsets, templateNodeInfos, false)
 	}
 	return a.instrumentedScaleUp(ctx, state.currentTime, scaleUpFn)
 }
 
-func (a *StaticAutoscaler) runScaleUpSalvo(ctx context.Context, state *loopState, nodes []*apiv1.Node) (*status.ScaleUpStatus, caerrors.AutoscalerError) {
+func (a *StaticAutoscaler) runScaleUpSalvo(ctx context.Context, state *loopState, nodes []*apiv1.Node, templateNodeInfos map[string]*framework.NodeInfo) (*status.ScaleUpStatus, caerrors.AutoscalerError) {
 	logger := klog.FromContext(ctx)
 	var scaleUpStatus *status.ScaleUpStatus
 	var typedErr caerrors.AutoscalerError
@@ -825,7 +832,6 @@ func (a *StaticAutoscaler) runScaleUpSalvo(ctx context.Context, state *loopState
 		podsMap[pod.UID] = pod
 	}
 
-	templateNodeInfos := a.TemplateNodeInfoRegistry.GetNodeInfos()
 	budget := a.AutoscalingContext.AutoscalingOptions.SalvoScaleUpBudget
 	salvoCtx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
@@ -835,7 +841,7 @@ func (a *StaticAutoscaler) runScaleUpSalvo(ctx context.Context, state *loopState
 		logger.V(4).Info("Scale up salvo: starting iteration", "iteration", i, "podsLeftCount", len(podsMap))
 		state.unschedulablePodsToHelp = slices.Collect(maps.Values(podsMap))
 
-		handledPods, scaleUpStatus, typedErr = a.runSingleScaleUp(ctx, state, nodes)
+		handledPods, scaleUpStatus, typedErr = a.runSingleScaleUp(ctx, state, nodes, templateNodeInfos)
 		if typedErr != nil {
 			logger.Info("Scale up failed, finishing the scale up salvo", "err", typedErr)
 			break
