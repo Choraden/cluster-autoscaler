@@ -19,6 +19,7 @@ package kwok
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -235,6 +236,158 @@ func TestDeleteNodes(t *testing.T) {
 	assert.Contains(t, err.Error(), "not managed by kwok")
 	assert.False(t, deletedNodes[nodeWithoutKwokAnnotation.GetName()])
 
+}
+
+func TestNodeGroupConcurrentSizeChanges(t *testing.T) {
+	newFakeClient := func() *fake.Clientset {
+		fakeClient := &fake.Clientset{}
+		fakeClient.Fake.AddReactor("create", "nodes", func(action core.Action) (bool, runtime.Object, error) {
+			return true, nil, nil
+		})
+		fakeClient.Fake.AddReactor("delete", "nodes", func(action core.Action) (bool, runtime.Object, error) {
+			return true, nil, nil
+		})
+		return fakeClient
+	}
+	newNodeGroup := func(minSize, targetSize, maxSize int) *NodeGroup {
+		return &NodeGroup{
+			name:       "ng",
+			kubeClient: newFakeClient(),
+			lister:     kube_util.NewTestNodeLister(nil),
+			nodeTemplate: &apiv1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "template-node-ng",
+					Labels:      map[string]string{"kwok-nodegroup": "ng"},
+					Annotations: map[string]string{NGNameAnnotation: "ng", KwokManagedAnnotation: "fake"},
+				},
+			},
+			minSize:    minSize,
+			targetSize: targetSize,
+			maxSize:    maxSize,
+		}
+	}
+	nodeToDelete := func(i int) *apiv1.Node {
+		return &apiv1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        fmt.Sprintf("ng-%d", i),
+				Annotations: map[string]string{KwokManagedAnnotation: "fake", NGNameAnnotation: "ng"},
+			},
+		}
+	}
+
+	t.Run("concurrent increases and deletes keep target size consistent", func(t *testing.T) {
+		ng := newNodeGroup(0, 100, 1000)
+		const ops = 50
+
+		var wg sync.WaitGroup
+		for i := 0; i < ops; i++ {
+			wg.Add(3)
+			go func(i int) {
+				defer wg.Done()
+				assert.NoError(t, ng.DeleteNodes(context.Background(), []*apiv1.Node{nodeToDelete(i)}))
+			}(i)
+			go func() {
+				defer wg.Done()
+				assert.NoError(t, ng.IncreaseSize(context.Background(), 1))
+			}()
+			go func() {
+				defer wg.Done()
+				_, err := ng.TargetSize(context.Background())
+				assert.NoError(t, err)
+			}()
+		}
+		wg.Wait()
+
+		size, err := ng.TargetSize(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 100, size)
+	})
+
+	t.Run("concurrent deletes never go below min size", func(t *testing.T) {
+		ng := newNodeGroup(5, 10, 100)
+		const deletes = 20
+
+		var wg sync.WaitGroup
+		var mutex sync.Mutex
+		succeeded := 0
+		for i := 0; i < deletes; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				if err := ng.DeleteNodes(context.Background(), []*apiv1.Node{nodeToDelete(i)}); err == nil {
+					mutex.Lock()
+					succeeded++
+					mutex.Unlock()
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		size, err := ng.TargetSize(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 5, size)
+		assert.Equal(t, 5, succeeded)
+	})
+
+	t.Run("concurrent increases never go above max size", func(t *testing.T) {
+		ng := newNodeGroup(0, 0, 5)
+		const increases = 20
+
+		var wg sync.WaitGroup
+		for i := 0; i < increases; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = ng.IncreaseSize(context.Background(), 1)
+			}()
+		}
+		wg.Wait()
+
+		size, err := ng.TargetSize(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 5, size)
+	})
+
+	t.Run("refresh runs concurrently with size changes", func(t *testing.T) {
+		ng := newNodeGroup(0, 100, 1000)
+		provider := &KwokCloudProvider{
+			nodeGroups: []*NodeGroup{ng},
+			config: &KwokProviderConfig{
+				status: &GroupingConfig{groupNodesBy: groupNodesByLabel, key: "kwok-nodegroup"},
+			},
+			allNodesLister: newTestAllNodeLister(map[string]*apiv1.Node{
+				"ng-0": {ObjectMeta: metav1.ObjectMeta{Name: "ng-0", Annotations: map[string]string{NGNameAnnotation: "ng"}}},
+			}),
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < 20; i++ {
+			wg.Add(4)
+			go func() {
+				defer wg.Done()
+				assert.NoError(t, provider.Refresh(context.Background()))
+			}()
+			go func(i int) {
+				defer wg.Done()
+				_ = ng.DeleteNodes(context.Background(), []*apiv1.Node{nodeToDelete(i)})
+			}(i)
+			go func() {
+				defer wg.Done()
+				_ = ng.IncreaseSize(context.Background(), 1)
+			}()
+			go func() {
+				defer wg.Done()
+				_ = ng.DecreaseTargetSize(context.Background(), -1)
+			}()
+		}
+		wg.Wait()
+
+		// Refresh sets the target size to the number of nodes seen in the cluster.
+		assert.NoError(t, provider.Refresh(context.Background()))
+		size, err := ng.TargetSize(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, size)
+	})
 }
 
 func TestDecreaseTargetSize(t *testing.T) {

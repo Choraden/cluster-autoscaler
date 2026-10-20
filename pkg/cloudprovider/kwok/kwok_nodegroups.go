@@ -52,7 +52,16 @@ func (nodeGroup *NodeGroup) MinSize(ctx context.Context) int {
 // TargetSize returns the current TARGET size of the node group. It is possible that the
 // number is different from the number of nodes registered in Kubernetes.
 func (nodeGroup *NodeGroup) TargetSize(ctx context.Context) (int, error) {
+	nodeGroup.mu.Lock()
+	defer nodeGroup.mu.Unlock()
 	return nodeGroup.targetSize, nil
+}
+
+// setTargetSize overwrites the target size of the node group.
+func (nodeGroup *NodeGroup) setTargetSize(size int) {
+	nodeGroup.mu.Lock()
+	defer nodeGroup.mu.Unlock()
+	nodeGroup.targetSize = size
 }
 
 // IncreaseSize increases NodeGroup size.
@@ -60,6 +69,12 @@ func (nodeGroup *NodeGroup) IncreaseSize(ctx context.Context, delta int) error {
 	if delta <= 0 {
 		return fmt.Errorf(sizeIncreaseMustBePositiveErr)
 	}
+
+	// Hold the lock for the whole operation so that concurrent size changes
+	// can't push the node group above its max size.
+	nodeGroup.mu.Lock()
+	defer nodeGroup.mu.Unlock()
+
 	size := nodeGroup.targetSize
 	newSize := int(size) + delta
 	if newSize > nodeGroup.MaxSize(context.TODO()) {
@@ -103,6 +118,11 @@ func (nodeGroup *NodeGroup) AtomicIncreaseSize(ctx context.Context, delta int) e
 
 // DeleteNodes deletes the specified nodes from the node group.
 func (nodeGroup *NodeGroup) DeleteNodes(ctx context.Context, nodes []*apiv1.Node) error {
+	// Hold the lock for the whole operation so that concurrent deletions
+	// can't push the node group below its min size.
+	nodeGroup.mu.Lock()
+	defer nodeGroup.mu.Unlock()
+
 	size := nodeGroup.targetSize
 	if size <= nodeGroup.MinSize(context.TODO()) {
 		return fmt.Errorf(minSizeReachedErr)
@@ -141,6 +161,10 @@ func (nodeGroup *NodeGroup) DecreaseTargetSize(ctx context.Context, delta int) e
 	if delta >= 0 {
 		return fmt.Errorf(sizeDecreaseMustBeNegativeErr)
 	}
+
+	nodeGroup.mu.Lock()
+	defer nodeGroup.mu.Unlock()
+
 	size := nodeGroup.targetSize
 	nodes, err := nodeGroup.getNodeNamesForNodeGroup()
 	if err != nil {
