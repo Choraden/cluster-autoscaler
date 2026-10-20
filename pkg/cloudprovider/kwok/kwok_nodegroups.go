@@ -68,13 +68,14 @@ func (nodeGroup *NodeGroup) IncreaseSize(ctx context.Context, delta int) error {
 
 	klog.V(5).Infof("increasing size of nodegroup '%s' to %v (old size: %v, delta: %v)", nodeGroup.name, newSize, size, delta)
 
-	schedNode, err := nodeGroup.TemplateNodeInfo(context.TODO())
-	if err != nil {
+	if nodeGroup.nodeTemplate == nil {
 		return fmt.Errorf("couldn't create a template node for nodegroup %s", nodeGroup.name)
 	}
 
 	for i := 0; i < delta; i++ {
-		node := schedNode.Node()
+		// Every new node must be built from a fresh copy of the template,
+		// otherwise the shared node group template would be mutated in place.
+		node := nodeGroup.nodeTemplate.DeepCopy()
 		node.Name = fmt.Sprintf("%s-%s", nodeGroup.name, rand.String(5))
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
@@ -200,7 +201,8 @@ func (nodeGroup *NodeGroup) Nodes(ctx context.Context) ([]cloudprovider.Instance
 
 // TemplateNodeInfo returns a node template for this node group.
 func (nodeGroup *NodeGroup) TemplateNodeInfo(ctx context.Context) (*framework.NodeInfo, error) {
-	nodeInfo := framework.NewNodeInfo(nodeGroup.nodeTemplate, nil, framework.NewPodInfo(cloudprovider.BuildKubeProxy(nodeGroup.Id()), nil))
+	// Return a copy so that callers can't mutate the node group template.
+	nodeInfo := framework.NewNodeInfo(nodeGroup.nodeTemplate.DeepCopy(), nil, framework.NewPodInfo(cloudprovider.BuildKubeProxy(nodeGroup.Id()), nil))
 	return nodeInfo, nil
 }
 

@@ -91,6 +91,65 @@ func TestIncreaseSize(t *testing.T) {
 
 }
 
+func TestIncreaseSizeDoesNotMutateTemplate(t *testing.T) {
+	fakeClient := &fake.Clientset{}
+
+	nodes := []*apiv1.Node{}
+	fakeClient.Fake.AddReactor("create", "nodes",
+		func(action core.Action) (bool, runtime.Object, error) {
+			nodes = append(nodes, action.(core.CreateAction).GetObject().(*apiv1.Node))
+			return true, nil, nil
+		})
+
+	template := &apiv1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "template-node-ng",
+			Labels:      map[string]string{"kwok-nodegroup": "ng"},
+			Annotations: map[string]string{NGNameAnnotation: "ng"},
+		},
+		Spec: apiv1.NodeSpec{
+			ProviderID: getProviderID("template-node-ng"),
+		},
+	}
+	templateCopy := template.DeepCopy()
+
+	ng := NodeGroup{
+		name:         "ng",
+		kubeClient:   fakeClient,
+		lister:       kube_util.NewTestNodeLister(nil),
+		nodeTemplate: template,
+		minSize:      0,
+		targetSize:   0,
+		maxSize:      10,
+	}
+
+	err := ng.IncreaseSize(context.Background(), 3)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, ng.targetSize)
+	assert.Equal(t, templateCopy, ng.nodeTemplate, "template must not be mutated by IncreaseSize")
+
+	names := map[string]bool{}
+	for _, n := range nodes {
+		names[n.GetName()] = true
+		assert.Equal(t, n.GetName(), n.Labels["kubernetes.io/hostname"])
+		assert.Equal(t, getProviderID(n.GetName()), n.Spec.ProviderID)
+		assert.Equal(t, "ng", n.Labels["kwok-nodegroup"])
+	}
+	assert.Len(t, names, 3, "every created node must have a unique name")
+
+	// Template returned by TemplateNodeInfo must be a copy as well.
+	ti, err := ng.TemplateNodeInfo(context.Background())
+	assert.NoError(t, err)
+	ti.Node().Name = "mutated"
+	ti.Node().Labels["mutated"] = "true"
+	assert.Equal(t, templateCopy, ng.nodeTemplate, "template must not be mutated through TemplateNodeInfo")
+
+	// nil template
+	ng.nodeTemplate = nil
+	err = ng.IncreaseSize(context.Background(), 1)
+	assert.Error(t, err)
+}
+
 func TestDeleteNodes(t *testing.T) {
 	fakeClient := &fake.Clientset{}
 
@@ -310,6 +369,7 @@ func TestTemplateNodeInfo(t *testing.T) {
 	assert.Len(t, ti.Pods(), 1)
 	assert.Contains(t, ti.Pods()[0].Pod.Name, fmt.Sprintf("kube-proxy-%s", ng.name))
 	assert.Equal(t, ng.nodeTemplate, ti.Node())
+	assert.NotSame(t, ng.nodeTemplate, ti.Node())
 
 }
 
