@@ -66,6 +66,10 @@ type ScaleUpRequest struct {
 	NodeGroup cloudprovider.NodeGroup
 	// Time is the time when the request was submitted.
 	Time time.Time
+	// IgnoreUnregisteredBefore is set when the request is first submitted. Nodes first seen before it had already
+	// exceeded the max node provision time by then, so they don't belong to the request. Unlike Time, it doesn't
+	// change when the request is extended.
+	IgnoreUnregisteredBefore time.Time
 	// ExpectedAddTime is the time at which the request should be fulfilled.
 	ExpectedAddTime time.Time
 	// How much the node group is increased.
@@ -296,10 +300,11 @@ func (csr *ClusterStateRegistry) registerOrUpdateScaleUpNoLock(ctx context.Conte
 	scaleUpRequest, found := csr.scaleUpRequests[nodeGroup.Id()]
 	if !found && delta > 0 {
 		scaleUpRequest = &ScaleUpRequest{
-			NodeGroup:       nodeGroup,
-			Increase:        delta,
-			Time:            currentTime,
-			ExpectedAddTime: currentTime.Add(maxNodeProvisionTime),
+			NodeGroup:                nodeGroup,
+			Increase:                 delta,
+			Time:                     currentTime,
+			ExpectedAddTime:          currentTime.Add(maxNodeProvisionTime),
+			IgnoreUnregisteredBefore: currentTime.Add(-maxNodeProvisionTime),
 		}
 		csr.scaleUpRequests[nodeGroup.Id()] = scaleUpRequest
 		return
@@ -349,7 +354,7 @@ func (csr *ClusterStateRegistry) updateScaleRequests(ctx context.Context, curren
 		if csr.asyncNodeGroupStateChecker.IsUpcoming(scaleUpRequest.NodeGroup) {
 			continue
 		}
-		if !csr.areThereUpcomingNodesInNodeGroup(ctx, nodeGroupName) {
+		if !csr.areThereUpcomingNodesInNodeGroup(ctx, nodeGroupName, scaleUpRequest.IgnoreUnregisteredBefore) {
 			// scale up finished successfully, remove request
 			delete(csr.scaleUpRequests, nodeGroupName)
 			logger.V(4).Info("Scale up in group finished successfully", "nodeGroupName", nodeGroupName, "duration", currentTime.Sub(scaleUpRequest.Time))
@@ -615,10 +620,16 @@ func (csr *ClusterStateRegistry) getUpcomingNodesInNodeGroup(ctx context.Context
 	return calculateUpcomingNodesInNodeGroup(readiness, acceptable), true
 }
 
-func (csr *ClusterStateRegistry) areThereUpcomingNodesInNodeGroup(ctx context.Context, nodeGroupName string) bool {
+func (csr *ClusterStateRegistry) areThereUpcomingNodesInNodeGroup(ctx context.Context, nodeGroupName string, ignoreUnregisteredBefore time.Time) bool {
 	upcoming, ok := csr.getUpcomingNodesInNodeGroup(ctx, nodeGroupName)
 	if !ok {
 		return false
+	}
+	// Long-unregistered nodes aren't upcoming, but the ones added by this request haven't fulfilled it.
+	for _, name := range csr.perNodeGroupReadiness[nodeGroupName].LongUnregistered {
+		if !csr.unregisteredNodes[name].UnregisteredSince.Before(ignoreUnregisteredBefore) {
+			upcoming++
+		}
 	}
 	return upcoming > 0
 }
@@ -640,11 +651,11 @@ func (csr *ClusterStateRegistry) IsNodeGroupAtTargetSize(nodeGroupName string) b
 
 // IsNodeGroupScalingUp returns true if the node group is currently scaling up.
 func (csr *ClusterStateRegistry) IsNodeGroupScalingUp(ctx context.Context, nodeGroupName string) bool {
-	if !csr.areThereUpcomingNodesInNodeGroup(ctx, nodeGroupName) {
+	scaleUpRequest, found := csr.scaleUpRequests[nodeGroupName]
+	if !found {
 		return false
 	}
-	_, found := csr.scaleUpRequests[nodeGroupName]
-	return found
+	return csr.areThereUpcomingNodesInNodeGroup(ctx, nodeGroupName, scaleUpRequest.IgnoreUnregisteredBefore)
 }
 
 // HasNodeGroupStartedScaleUp returns true if the node group has started scale up regardless
